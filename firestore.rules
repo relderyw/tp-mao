@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Blueprints ---
+
+    function isValidProcess(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.sector is string && data.sector.size() <= 100 &&
+             data.origin is string && data.origin.size() <= 100 &&
+             data.function is string && data.function.size() <= 100;
+    }
+
+    function isValidStep(data) {
+      return isValidId(data.processId) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.order is number;
+    }
+
+    function isValidStudySession(data) {
+      return isValidId(data.processId) &&
+             data.userId == request.auth.uid &&
+             data.status in ['in-progress', 'completed'];
+    }
+
+    function isValidMeasurement(data) {
+      return isValidId(data.sessionId) &&
+             isValidId(data.stepId) &&
+             data.duration is number && data.duration >= 0;
+    }
+
+    // --- Collection Rules ---
+
+    match /processes/{processId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidProcess(incoming());
+      allow update: if isSignedIn() && isValidProcess(incoming()) &&
+                     incoming().diff(existing()).affectedKeys().hasOnly(['name', 'sector', 'origin', 'function']);
+      allow delete: if isSignedIn(); // Add admin check if needed
+
+      match /steps/{stepId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && isValidStep(incoming());
+        allow update: if isSignedIn() && isValidStep(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'order', 'unitOfMeasure', 'isHeading']);
+        allow delete: if isSignedIn();
+
+        match /substeps/{substepId} {
+          allow read: if isSignedIn();
+          allow create: if isSignedIn() && isValidStep(incoming());
+          allow update: if isSignedIn() && isValidStep(incoming()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'order', 'unitOfMeasure']);
+          allow delete: if isSignedIn();
+        }
+      }
+    }
+
+    match /study_sessions/{sessionId} {
+      allow read: if isSignedIn() && (isOwner(existing().userId) || true); // Allow all authenticated for reports? Or just owner? User said "team", so maybe all signed in can see results.
+      allow create: if isSignedIn() && isValidStudySession(incoming());
+      allow update: if isSignedIn() && isValidStudySession(incoming()) &&
+                     existing().status == 'in-progress' &&
+                     incoming().diff(existing()).affectedKeys().hasOnly(['status', 'endTime']);
+      allow delete: if isSignedIn() && isOwner(existing().userId);
+
+      match /measurements/{measurementId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() &&
+                       get(/databases/$(database)/documents/study_sessions/$(sessionId)).data.status == 'in-progress' &&
+                       isValidMeasurement(incoming());
+        allow update: if false; // Measurements should be immutable for integrity
+        allow delete: if isSignedIn() && get(/databases/$(database)/documents/study_sessions/$(sessionId)).data.userId == request.auth.uid;
+      }
+    }
+  }
+}

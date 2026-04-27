@@ -1,0 +1,83 @@
+{
+  "entities": {
+    "Process": {
+      "title": "Logistics Process",
+      "description": "A main logistics activity to be mapped (e.g., Receiving, Picking).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "description": "Name of the process" },
+        "sector": { "type": "string", "description": "Department/Sector (e.g., Recebimento)" },
+        "origin": { "type": "string", "description": "Origin of material (e.g., Importado)" },
+        "function": { "type": "string", "description": "Role performing the task" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "sector", "origin", "function"]
+    },
+    "Step": {
+      "title": "Process Step",
+      "description": "A sub-activity within a main process.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "processId": { "type": "string" },
+        "name": { "type": "string" },
+        "order": { "type": "number" },
+        "unitOfMeasure": { "type": "string", "description": "e.g., KD, CARRO, ETIQUETA" }
+      },
+      "required": ["processId", "name", "order"]
+    },
+    "StudySession": {
+      "title": "Time Study Session",
+      "description": "A session recording multiple measurements for a process.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "processId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["in-progress", "completed"] },
+        "iterationName": { "type": "string", "description": "e.g., 1º Tempo, 2º Tempo" }
+      },
+      "required": ["processId", "userId", "startTime", "status"]
+    },
+    "Measurement": {
+      "title": "Time Measurement",
+      "description": "A single duration recorded for a specific step.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "stepId": { "type": "string" },
+        "duration": { "type": "number", "description": "Duration in seconds" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "quantity": { "type": "number", "description": "Quantity processed" }
+      },
+      "required": ["sessionId", "stepId", "duration"]
+    }
+  },
+  "firestore": {
+    "/processes/{processId}": {
+      "schema": "Process",
+      "description": "Metadata for main activities."
+    },
+    "/processes/{processId}/steps/{stepId}": {
+      "schema": "Step",
+      "description": "Activity level steps (e.g., RETIRADA DO KD)."
+    },
+    "/processes/{processId}/steps/{stepId}/substeps/{substepId}": {
+      "schema": "Step",
+      "description": "Granular tasks within an activity."
+    },
+    "/study_sessions/{sessionId}": {
+      "schema": "StudySession",
+      "description": "Study session metadata."
+    },
+    "/study_sessions/{sessionId}/measurements/{measurementId}": {
+      "schema": "Measurement",
+      "description": "Recorded times for each step in a session."
+    }
+  }
+}
