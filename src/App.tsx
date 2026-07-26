@@ -6,12 +6,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   LogOut, Activity, BarChart3, Settings as SettingsIcon,
-  Table, Eye, EyeOff, Users, Clock, Package, ScanLine
+  Table, Eye, EyeOff, Users, Clock, Package, ScanLine, FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
 import MappingWorkspace from './components/MappingWorkspace';
 import ProcessManager from './components/ProcessManager';
+import ItemsReport from './components/ItemsReport';
 import Reports from './components/Reports';
 import SpreadsheetView from './components/SpreadsheetView';
 import UsersTab from './components/UsersTab';
@@ -194,6 +195,7 @@ function AppContent() {
   const tabs = [
     { id: 'dashboard',   label: 'Dashboard',  icon: Activity },
     { id: 'timer',       label: 'Mapeamento', icon: Clock },
+    { id: 'reports',     label: 'Relatório',  icon: FileText },
     { id: 'check',       label: 'Check KD',   icon: ScanLine },
     ...(isAdmin ? [
       { id: 'users', label: 'Usuários', icon: Users }
@@ -302,6 +304,9 @@ function AppContent() {
               <MappingWorkspace
                 initialSku={selectedProcessId || undefined}
               />
+            )}
+            {activeTab === 'reports' && (
+              <ItemsReport />
             )}
             {activeTab === 'check' && (
               <CheckKD

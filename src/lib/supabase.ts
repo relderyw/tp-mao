@@ -302,6 +302,73 @@ export async function getSkusList(search: string = '', limit: number = 50): Prom
   return data || [];
 }
 
+export interface SkusReportFilters {
+  search?: string;
+  modelo?: string;
+  status?: string;
+  responsavel?: string;
+  dataInicio?: string; // YYYY-MM-DD
+  dataFim?: string;    // YYYY-MM-DD
+  page?: number;
+  pageSize?: number;
+}
+
+/** Busca itens para o Relatório com filtros avançados + paginação */
+export async function getSkusReport(
+  filters: SkusReportFilters = {}
+): Promise<{ data: SkuTp[]; total: number }> {
+  const { search, modelo, status, responsavel, dataInicio, dataFim, page = 0, pageSize = 50 } = filters;
+
+  let query = supabase
+    .from('sku_tp')
+    .select('*', { count: 'exact' })
+    .order('updated_at', { ascending: false, nullsFirst: false });
+
+  if (search?.trim()) {
+    const s = search.trim();
+    query = query.or(`sku.ilike.%${s}%,descricao.ilike.%${s}%`);
+  }
+  if (modelo?.trim()) query = query.ilike('modelo', `%${modelo.trim()}%`);
+  if (status?.trim()) query = query.eq('status', status.trim());
+  if (responsavel?.trim()) query = query.ilike('responsavel', `%${responsavel.trim()}%`);
+  if (dataInicio) query = query.gte('data_map', dataInicio);
+  if (dataFim) query = query.lte('data_map', dataFim + ' 23:59:59');
+
+  query = query.range(page * pageSize, (page + 1) * pageSize - 1);
+
+  const { data, count, error } = await query;
+  if (error) {
+    console.error('Erro ao buscar relatório de SKUs:', error);
+    return { data: [], total: 0 };
+  }
+  return { data: data || [], total: count || 0 };
+}
+
+/** Busca lista de modelos únicos para o filtro */
+export async function getUniqueModels(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('sku_tp')
+    .select('modelo')
+    .not('modelo', 'is', null)
+    .order('modelo');
+  if (error) return [];
+  const unique = [...new Set((data || []).map(d => d.modelo).filter(Boolean))];
+  return unique;
+}
+
+/** Busca lista de analistas únicos para o filtro */
+export async function getUniqueAnalysts(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('sku_tp')
+    .select('responsavel')
+    .not('responsavel', 'is', null)
+    .order('responsavel');
+  if (error) return [];
+  const unique = [...new Set((data || []).map(d => d.responsavel).filter(Boolean))];
+  return unique as string[];
+}
+
+
 /** Salva as tomadas de um sub-processo específico de um SKU no Supabase */
 export async function saveSubProcessMeasurements(
   sku: string,
