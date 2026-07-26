@@ -95,6 +95,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
   const timerRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
   const timeRef = useRef<number>(0);
+  const rightPanelRef = useRef<HTMLDivElement>(null); // para scroll automático no mobile
 
   // Mantém timeRef sempre sincronizado com time
   useEffect(() => { timeRef.current = time; }, [time]);
@@ -214,11 +215,19 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     setIsRunning(false);
   };
 
+  // Rola suavemente o painel de mapeamento para a visão (comportamento mobile)
+  const scrollToPanel = () => {
+    setTimeout(() => {
+      rightPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
+
   // Trocar de SKU (setas ← →)
   const handlePrevSku = () => {
     if (selectedSkuIndex > 0) {
       setSelectedSkuIndex(selectedSkuIndex - 1);
       resetTimer();
+      scrollToPanel();
     }
   };
 
@@ -226,6 +235,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     if (selectedSkuIndex < skus.length - 1) {
       setSelectedSkuIndex(selectedSkuIndex + 1);
       resetTimer();
+      scrollToPanel();
     }
   };
 
@@ -459,7 +469,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                 return (
                   <button
                     key={skuItem.sku}
-                    onClick={() => { setSelectedSkuIndex(idx); resetTimer(); }}
+                    onClick={() => { setSelectedSkuIndex(idx); resetTimer(); scrollToPanel(); }}
                     className={`w-full text-left p-3.5 rounded-2xl border transition-all flex items-center justify-between group ${
                       isSelected
                         ? 'bg-[#252a36] border-orange-500 shadow-lg shadow-orange-500/10'
@@ -482,8 +492,8 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
           </div>
         </div>
 
-        {/* ── PAINEL DIREITO: CRONÔMETRO E SUB-PROCESSOS (7 colunas no desktop) ── */}
-        <div className="lg:col-span-7 space-y-4">
+        {/* ── PAINEL DIREITO: CRONÔMETRO E SUB-PROCESSOS ── */}
+        <div ref={rightPanelRef} className="lg:col-span-7 space-y-4 scroll-mt-4">
 
           {/* Header do SKU Ativo com Navegação das Setas ← → */}
           <div className="bg-[#181b22] border border-slate-800/80 rounded-3xl p-4 flex items-center justify-between">
