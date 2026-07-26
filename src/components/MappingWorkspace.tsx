@@ -87,12 +87,17 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
   const [stats, setStats] = useState<StatsTp>({ total: 8643, concluidos: 0, andamento: 0, pendentes: 8643 });
 
   // Estado do sub-processo ativo
-  const [activeProcessId, setActiveProcessId] = useState<string>('abrir');
+  const [activeProcessId, setActiveProcessId] = useState<string>('pegar_ik');
 
-  // Cronômetro
+  // Cronômetro — usa ref para o startTime para evitar recriação do interval a cada tick
   const [time, setTime] = useState<number>(0);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const timerRef = useRef<number | null>(null);
+  const startTimeRef = useRef<number>(0); // Date.now() de quando o timer começou
+  const timeRef = useRef<number>(0);       // espelho de `time` para leitura sem closure stale
+
+  // Mantém timeRef sempre sincronizado com time
+  useEffect(() => { timeRef.current = time; }, [time]);
 
   // Carregar SKUs e estatísticas
   useEffect(() => {
@@ -122,21 +127,34 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
 
   const selectedSku = skus[selectedSkuIndex] || null;
 
-  // Lógica do cronômetro
+  // Lógica do cronômetro — NÃO inclui `time` nas dependências para não recriar o interval a cada tick
   useEffect(() => {
     if (isRunning) {
-      const start = Date.now() - (time * 1000);
+      startTimeRef.current = Date.now() - (timeRef.current * 1000);
+      if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = window.setInterval(() => {
-        setTime((Date.now() - start) / 1000);
+        const elapsed = (Date.now() - startTimeRef.current) / 1000;
+        setTime(elapsed);
+        timeRef.current = elapsed;
       }, 30);
     } else {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [isRunning, time]);
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [isRunning]); // ← apenas isRunning, sem time
 
   const resetTimer = () => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     setTime(0);
+    timeRef.current = 0;
     setIsRunning(false);
   };
 
@@ -222,8 +240,18 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     }
 
     if (keepRunningAfter) {
+      // Reinicia o cronômetro do zero imediatamente
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      startTimeRef.current = Date.now();
+      timeRef.current = 0;
       setTime(0);
       setIsRunning(true);
+      // Inicia interval manualmente pois isRunning pode já ser true (sem disparo de effect)
+      timerRef.current = window.setInterval(() => {
+        const elapsed = (Date.now() - startTimeRef.current) / 1000;
+        setTime(elapsed);
+        timeRef.current = elapsed;
+      }, 30);
     } else {
       resetTimer();
     }
@@ -234,10 +262,15 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
   // ── Botão CICLO (Grava tomada atual e reinicia o cronômetro imediatamente) ──
   const handleCiclo = async () => {
     const currentProc = PROCESS_CONFIGS.find(p => p.id === activeProcessId);
-    if (!currentProc || time === 0) return;
+    // Usa timeRef.current para garantir valor atual sem closure stale
+    const capturedTime = timeRef.current;
+    if (!currentProc || capturedTime < 0.1) return;
 
-    // Grava o tempo atual e MANTÉM O CRONÔMETRO RODANDO (zera e continua)
-    await recordTimeToProcess(currentProc, time, true);
+    // Para o cronômetro momentaneamente para capturar o tempo com precisão
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+
+    // Grava o tempo capturado e reinicia automaticamente
+    await recordTimeToProcess(currentProc, capturedTime, true);
   };
 
   // ── Trocar de Sub-processo com auto-salvamento se houver tempo decorrido ──
