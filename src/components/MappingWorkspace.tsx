@@ -1,0 +1,469 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  Search, ChevronLeft, ChevronRight, Play, Pause, Save, RotateCcw,
+  CheckCircle2, Clock, AlertCircle, Loader2, Sparkles, User, RefreshCw
+} from 'lucide-react';
+import {
+  getSkusList, getStatsTp, saveSubProcessMeasurements, SkuTp, StatsTp
+} from '../lib/supabase';
+import { getSession } from '../lib/auth';
+
+interface MappingWorkspaceProps {
+  initialSku?: string;
+  onClose?: () => void;
+}
+
+// Configuração dos 5 sub-processos padrão com cores combinando com o layout
+const PROCESS_CONFIGS = [
+  {
+    id: 'abrir',
+    title: 'Pegar e abrir caixa',
+    borderColor: 'border-orange-500',
+    bgColor: 'bg-orange-500/10',
+    textColor: 'text-orange-400',
+    btnColor: 'bg-orange-500 hover:bg-orange-600',
+    t1Key: 'abrir_t1', t2Key: 'abrir_t2', t3Key: 'abrir_t3', resKey: 'abrir_res'
+  },
+  {
+    id: 'form',
+    title: 'Formatagem',
+    borderColor: 'border-emerald-500',
+    bgColor: 'bg-emerald-500/10',
+    textColor: 'text-emerald-400',
+    btnColor: 'bg-emerald-500 hover:bg-emerald-600',
+    t1Key: 'form_t1', t2Key: 'form_t2', t3Key: 'form_t3', resKey: 'form_res'
+  },
+  {
+    id: 'desc',
+    title: 'Descartar resíduos',
+    borderColor: 'border-purple-500',
+    bgColor: 'bg-purple-500/10',
+    textColor: 'text-purple-400',
+    btnColor: 'bg-purple-500 hover:bg-purple-600',
+    t1Key: 'desc_t1', t2Key: 'desc_t2', t3Key: 'desc_t3', resKey: 'desc_res'
+  },
+  {
+    id: 'etq',
+    title: 'Colar etiqueta',
+    borderColor: 'border-blue-500',
+    bgColor: 'bg-blue-500/10',
+    textColor: 'text-blue-400',
+    btnColor: 'bg-blue-500 hover:bg-blue-600',
+    t1Key: 'etq_t1', t2Key: 'etq_t2', t3Key: 'etq_t3', resKey: 'etq_res'
+  },
+  {
+    id: 'pos',
+    title: 'Posicionar IK no palete',
+    borderColor: 'border-amber-500',
+    bgColor: 'bg-amber-500/10',
+    textColor: 'text-amber-400',
+    btnColor: 'bg-amber-500 hover:bg-amber-600',
+    t1Key: 'pos_t1', t2Key: 'pos_t2', t3Key: 'pos_t3', resKey: 'pos_res'
+  }
+] as const;
+
+export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) {
+  const currentUser = getSession();
+  const operatorName = currentUser?.displayName || 'Operador';
+
+  // Estados dos SKUs e busca
+  const [skus, setSkus] = useState<SkuTp[]>([]);
+  const [selectedSkuIndex, setSelectedSkuIndex] = useState<number>(0);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [loadingSkus, setLoadingSkus] = useState(true);
+
+  // Estatísticas do painel
+  const [stats, setStats] = useState<StatsTp>({ total: 8600, concluidos: 0, andamento: 0, pendentes: 8600 });
+
+  // Estado do sub-processo ativo
+  const [activeProcessId, setActiveProcessId] = useState<string>('abrir');
+
+  // Cronômetro
+  const [time, setTime] = useState<number>(0);
+  const [isRunning, setIsRunning] = useState<boolean>(false);
+  const timerRef = useRef<number | null>(null);
+
+  // Carregar SKUs e estatísticas
+  useEffect(() => {
+    loadData();
+  }, [searchTerm]);
+
+  const loadData = async () => {
+    setLoadingSkus(true);
+    try {
+      const [list, st] = await Promise.all([
+        getSkusList(searchTerm, 100),
+        getStatsTp()
+      ]);
+      setSkus(list);
+      setStats(st);
+
+      if (initialSku && list.length > 0) {
+        const idx = list.findIndex(s => s.sku === initialSku);
+        if (idx !== -1) setSelectedSkuIndex(idx);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingSkus(false);
+    }
+  };
+
+  const selectedSku = skus[selectedSkuIndex] || null;
+
+  // Lógica do cronômetro
+  useEffect(() => {
+    if (isRunning) {
+      const start = Date.now() - (time * 1000);
+      timerRef.current = window.setInterval(() => {
+        setTime((Date.now() - start) / 1000);
+      }, 30);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [isRunning, time]);
+
+  // Trocar de SKU (setas ← →)
+  const handlePrevSku = () => {
+    if (selectedSkuIndex > 0) {
+      setSelectedSkuIndex(selectedSkuIndex - 1);
+      resetTimer();
+    }
+  };
+
+  const handleNextSku = () => {
+    if (selectedSkuIndex < skus.length - 1) {
+      setSelectedSkuIndex(selectedSkuIndex + 1);
+      resetTimer();
+    }
+  };
+
+  const resetTimer = () => {
+    setTime(0);
+    setIsRunning(false);
+  };
+
+  // Gravar tomada para o sub-processo ativo
+  const handleRecordTime = async (procConfig: typeof PROCESS_CONFIGS[number]) => {
+    if (!selectedSku || time === 0) return;
+
+    const tVal = Number(time.toFixed(2));
+
+    // Identifica qual tomada (t1, t2 ou t3) está vaga
+    const t1 = selectedSku[procConfig.t1Key as keyof SkuTp] as number | null;
+    const t2 = selectedSku[procConfig.t2Key as keyof SkuTp] as number | null;
+
+    let targetKey: string = procConfig.t1Key;
+    if (t1 != null && t2 == null) targetKey = procConfig.t2Key;
+    else if (t1 != null && t2 != null) targetKey = procConfig.t3Key;
+
+    const currentT1 = (targetKey === procConfig.t1Key ? tVal : t1) || 0;
+    const currentT2 = (targetKey === procConfig.t2Key ? tVal : t2) || 0;
+    const currentT3 = (targetKey === procConfig.t3Key ? tVal : (selectedSku[procConfig.t3Key as keyof SkuTp] as number)) || 0;
+
+    // Média das tomadas preenchidas
+    const validTs = [currentT1, currentT2, currentT3].filter(v => v > 0);
+    const avg = validTs.length > 0 ? Number((validTs.reduce((a, b) => a + b, 0) / validTs.length).toFixed(2)) : 0;
+
+    const fieldsToSave: Partial<SkuTp> = {
+      [targetKey]: tVal,
+      [procConfig.resKey]: avg
+    };
+
+    const updated = await saveSubProcessMeasurements(selectedSku.sku, fieldsToSave, operatorName);
+
+    if (updated) {
+      // Atualiza lista local
+      const newSkus = [...skus];
+      newSkus[selectedSkuIndex] = updated;
+      setSkus(newSkus);
+      setStats(await getStatsTp());
+    }
+
+    resetTimer();
+  };
+
+  // Limpar tomadas de um sub-processo
+  const handleClearProcess = async (procConfig: typeof PROCESS_CONFIGS[number]) => {
+    if (!selectedSku) return;
+
+    const fieldsToSave: Partial<SkuTp> = {
+      [procConfig.t1Key]: null,
+      [procConfig.t2Key]: null,
+      [procConfig.t3Key]: null,
+      [procConfig.resKey]: null
+    };
+
+    const updated = await saveSubProcessMeasurements(selectedSku.sku, fieldsToSave, operatorName);
+    if (updated) {
+      const newSkus = [...skus];
+      newSkus[selectedSkuIndex] = updated;
+      setSkus(newSkus);
+    }
+  };
+
+  const formatSecondsDisplay = (sec: number) => {
+    const s = Math.floor(sec);
+    const ms = Math.floor((sec - s) * 10);
+    return `${s < 10 ? '0' + s : s}.${ms}`;
+  };
+
+  return (
+    <div className="min-h-screen bg-[#111319] text-white p-4 md:p-6 font-sans">
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+        {/* ── PAINEL ESQUERDO: LISTA & PROGRESSO (5 colunas no desktop) ── */}
+        <div className="lg:col-span-5 bg-[#181b22] border border-slate-800/80 rounded-3xl p-5 space-y-5 shadow-2xl">
+
+          {/* Header Esquerda */}
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-orange-500" />
+              RW T&amp;P
+            </h2>
+            <div className="flex items-center gap-2 text-slate-400 text-xs font-semibold bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700/50">
+              <User className="w-3.5 h-3.5 text-orange-400" />
+              <span>{operatorName}</span>
+            </div>
+          </div>
+
+          {/* Barra de Progresso */}
+          <div className="bg-[#1e222d] border border-slate-800 rounded-2xl p-4 space-y-2">
+            <div className="flex justify-between items-center text-xs font-bold">
+              <span className="text-slate-400">Progresso</span>
+              <span className="text-white font-mono text-sm">
+                {stats.concluidos} <span className="text-slate-500">/ {stats.total}</span>
+              </span>
+            </div>
+            <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(100, (stats.concluidos / (stats.total || 1)) * 100)}%` }}
+                transition={{ duration: 0.8, ease: 'easeOut' }}
+                className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full"
+              />
+            </div>
+          </div>
+
+          {/* 3 Cards Estatísticos (Pendente, Andamento, Concluído) */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-[#1e222d] border border-slate-800 rounded-2xl p-3 text-center">
+              <span className="text-2xl font-black text-white font-mono">{stats.pendentes}</span>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Pendente</p>
+            </div>
+            <div className="bg-[#1e222d] border border-slate-800 rounded-2xl p-3 text-center">
+              <span className="text-2xl font-black text-orange-400 font-mono">{stats.andamento}</span>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Andamento</p>
+            </div>
+            <div className="bg-[#1e222d] border border-slate-800 rounded-2xl p-3 text-center">
+              <span className="text-2xl font-black text-emerald-400 font-mono">{stats.concluidos}</span>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Concluído</p>
+            </div>
+          </div>
+
+          {/* Campo de Busca */}
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              placeholder="Buscar código ou descrição"
+              className="w-full bg-[#1e222d] border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-orange-500 transition-colors font-medium"
+            />
+          </div>
+
+          {/* Lista de SKUs na Lateral */}
+          <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+            {loadingSkus ? (
+              <div className="flex items-center justify-center py-12 text-slate-500">
+                <Loader2 className="w-6 h-6 animate-spin text-orange-500 mr-2" />
+                <span>Carregando SKUs...</span>
+              </div>
+            ) : skus.length === 0 ? (
+              <div className="text-center py-12 text-slate-500 text-xs font-semibold">
+                Nenhum SKU encontrado
+              </div>
+            ) : (
+              skus.map((skuItem, idx) => {
+                const isSelected = idx === selectedSkuIndex;
+                const statusColor =
+                  skuItem.status === 'mapeado' ? 'bg-emerald-500' :
+                  skuItem.status === 'andamento' ? 'bg-orange-500' : 'bg-slate-600';
+
+                return (
+                  <button
+                    key={skuItem.sku}
+                    onClick={() => { setSelectedSkuIndex(idx); resetTimer(); }}
+                    className={`w-full text-left p-3.5 rounded-2xl border transition-all flex items-center justify-between group ${
+                      isSelected
+                        ? 'bg-[#252a36] border-orange-500 shadow-lg shadow-orange-500/10'
+                        : 'bg-[#1e222d]/60 border-slate-800/80 hover:bg-[#222733] hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="min-w-0 pr-3">
+                      <p className={`font-black text-sm font-mono truncate ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                        {skuItem.sku}
+                      </p>
+                      <p className="text-xs text-slate-400 truncate mt-0.5 font-medium">
+                        {skuItem.descricao || 'Sem descrição'}
+                      </p>
+                    </div>
+                    <div className={`w-3 h-3 rounded-full flex-shrink-0 ${statusColor}`} />
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* ── PAINEL DIREITO: CRONÔMETRO E SUB-PROCESSOS (7 colunas no desktop) ── */}
+        <div className="lg:col-span-7 space-y-4">
+
+          {/* Header do SKU Ativo com Navegação das Setas ← → */}
+          <div className="bg-[#181b22] border border-slate-800/80 rounded-3xl p-4 flex items-center justify-between">
+            <button
+              onClick={handlePrevSku}
+              disabled={selectedSkuIndex === 0}
+              className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+
+            <div className="text-center min-w-0 px-4">
+              <h1 className="text-lg md:text-xl font-black text-white font-mono tracking-tight truncate">
+                {selectedSku ? selectedSku.sku : 'SELECIONE UM SKU'}
+              </h1>
+              <p className="text-xs text-slate-400 truncate font-medium mt-0.5">
+                {selectedSku ? selectedSku.descricao : 'Carregando...'}
+              </p>
+            </div>
+
+            <button
+              onClick={handleNextSku}
+              disabled={selectedSkuIndex >= skus.length - 1}
+              className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Accordion dos 5 Sub-processos */}
+          <div className="space-y-3">
+            {PROCESS_CONFIGS.map((proc) => {
+              const isActive = activeProcessId === proc.id;
+
+              // Extrai as tomadas do SKU para este sub-processo
+              const t1 = selectedSku?.[proc.t1Key as keyof SkuTp] as number | null;
+              const t2 = selectedSku?.[proc.t2Key as keyof SkuTp] as number | null;
+              const t3 = selectedSku?.[proc.t3Key as keyof SkuTp] as number | null;
+              const tomadas = [t1, t2, t3].filter(t => t != null && t > 0);
+              const totalTomadasCount = tomadas.length;
+
+              return (
+                <div
+                  key={proc.id}
+                  className={`rounded-3xl border transition-all duration-300 overflow-hidden ${
+                    isActive
+                      ? `bg-[#181b22] ${proc.borderColor} border-2 shadow-2xl`
+                      : 'bg-[#181b22]/70 border-slate-800/80 hover:border-slate-700'
+                  }`}
+                >
+                  {/* Cabeçalho do Card de Sub-processo */}
+                  <button
+                    onClick={() => {
+                      if (!isActive) {
+                        setActiveProcessId(proc.id);
+                        resetTimer();
+                      }
+                    }}
+                    className="w-full flex items-center justify-between p-5 text-left"
+                  >
+                    <span className={`font-black text-base md:text-lg ${proc.textColor}`}>
+                      {proc.title}
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-mono font-bold text-slate-400 bg-slate-800/60 px-3 py-1 rounded-full border border-slate-700/50">
+                        {totalTomadasCount} de 3
+                      </span>
+                    </div>
+                  </button>
+
+                  {/* Conteúdo Expandido do Sub-processo Ativo (Cronômetro + Botões) */}
+                  {isActive && (
+                    <div className="px-6 pb-6 pt-0 space-y-6">
+
+                      {/* Display Gigante do Tempo */}
+                      <div className="text-center py-2">
+                        <div className={`text-6xl md:text-7xl font-black font-mono tracking-tight tabular-nums ${
+                          isRunning ? 'text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.3)]' : 'text-white'
+                        }`}>
+                          {formatSecondsDisplay(time)}
+                        </div>
+
+                        {/* Pílulas das tomadas já gravadas: 1T 2.6s | 2T 2.3s | 3T 2.5s */}
+                        <div className="flex items-center justify-center gap-2 mt-4">
+                          {[
+                            { label: '1T', val: t1 },
+                            { label: '2T', val: t2 },
+                            { label: '3T', val: t3 }
+                          ].map((pill, idx) => (
+                            <div
+                              key={idx}
+                              className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-black flex items-center gap-1.5 ${
+                                pill.val != null
+                                  ? 'bg-slate-800 text-white border-slate-600'
+                                  : 'bg-slate-900/50 text-slate-600 border-slate-800 border-dashed'
+                              }`}
+                            >
+                              <span className="text-slate-400 text-[10px]">{pill.label}</span>
+                              <span>{pill.val != null ? pill.val.toFixed(1) + 's' : '--'}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Botões Principais de Ação */}
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setIsRunning(!isRunning)}
+                          className={`flex-1 py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 transition-all shadow-lg active:scale-98 ${
+                            isRunning
+                              ? 'bg-amber-500 text-slate-950 hover:bg-amber-400'
+                              : `${proc.btnColor} text-white`
+                          }`}
+                        >
+                          {isRunning ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
+                          {isRunning ? 'Pausar' : 'Iniciar'}
+                        </button>
+
+                        <button
+                          onClick={() => handleRecordTime(proc)}
+                          disabled={time === 0}
+                          className="px-6 py-4 rounded-2xl font-black text-sm bg-white text-slate-950 hover:bg-slate-100 disabled:opacity-20 transition-all flex items-center gap-2 shadow-lg"
+                        >
+                          <Save className="w-4 h-4" />
+                          Gravar
+                        </button>
+
+                        <button
+                          onClick={resetTimer}
+                          className="p-4 rounded-2xl bg-slate-800 text-slate-400 hover:text-red-400 hover:bg-slate-700 transition-all border border-slate-700/50"
+                        >
+                          <RotateCcw className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}

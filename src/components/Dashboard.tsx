@@ -1,238 +1,284 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { 
-  BarChart3, 
-  CheckCircle2, 
-  Clock, 
-  AlertCircle, 
-  TrendingUp, 
-  Target,
-  Activity,
-  Layers,
-  Play,
-  ArrowRight
+import { motion } from 'motion/react';
+import {
+  Users, CheckCircle2, Clock, Activity, RefreshCw, Loader2,
+  TrendingUp, Boxes, Play, ArrowRight, Award, Calendar
 } from 'lucide-react';
-
-interface Stats {
-  total: number;
-  completed: number;
-  pending: number;
-  percentOk: number;
-  percentPending: number;
-}
-
-interface ProcessSummary {
-  id: string;
-  name: string;
-  total: number;
-  completed: number;
-  percent: number;
-}
+import { getDashboardAnalytics, DashboardData } from '../lib/supabase';
 
 export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => void }) {
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<Stats>({ total: 0, completed: 0, pending: 0, percentOk: 0, percentPending: 0 });
-  const [processSummaries, setProcessSummaries] = useState<ProcessSummary[]>([]);
+  const [data, setData] = useState<DashboardData>({
+    stats: { total: 0, concluidos: 0, andamento: 0, pendentes: 0 },
+    analistas: [],
+    modelos: []
+  });
 
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
-
-  async function loadDashboardData() {
+  const loadData = async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'master_mapping'), orderBy('order')));
-      const items = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-
-      const isLeaf = (item: any, index: number) => {
-        const nextItem = items[index + 1];
-        if (!nextItem) return true;
-        return nextItem.level <= item.level;
-      };
-
-      const leafActivities = items.filter((item, idx) => item.level > 1 && isLeaf(item, idx));
-      const total = leafActivities.length;
-      const completed = leafActivities.filter(i => (i.referenceTime || 0) > 0).length;
-      const pending = total - completed;
-      const percentOk = total > 0 ? (completed / total) * 100 : 0;
-      const percentPending = total > 0 ? (pending / total) * 100 : 0;
-
-      setStats({ total, completed, pending, percentOk, percentPending });
-
-      const summaries: ProcessSummary[] = [];
-      const processes = items.filter(i => i.level === 1);
-
-      processes.forEach(proc => {
-        const procIndex = items.findIndex(i => i.id === proc.id);
-        let nextProcIndex = items.findIndex((i, idx) => idx > procIndex && i.level === 1);
-        if (nextProcIndex === -1) nextProcIndex = items.length;
-
-        const procLeafs = items.slice(procIndex + 1, nextProcIndex).filter((item, idx) => {
-          const globalIdx = procIndex + 1 + idx;
-          return isLeaf(item, globalIdx);
-        });
-
-        const pTotal = procLeafs.length;
-        const pCompleted = procLeafs.filter(i => (i.referenceTime || 0) > 0).length;
-
-        summaries.push({
-          id: proc.id,
-          name: proc.name,
-          total: pTotal,
-          completed: pCompleted,
-          percent: pTotal > 0 ? (pCompleted / pTotal) * 100 : 0
-        });
-      });
-
-      setProcessSummaries(summaries);
-    } catch (error) {
-      console.error('Error loading dashboard:', error);
+      const result = await getDashboardAnalytics();
+      setData(result);
+    } catch (err) {
+      console.error('Erro ao carregar métricas:', err);
     } finally {
       setLoading(false);
     }
-  }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const percentConcluido = data.stats.total > 0
+    ? Number(((data.stats.concluidos / data.stats.total) * 100).toFixed(1))
+    : 0;
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-4">
-        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-        <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Carregando Painel...</p>
+      <div className="flex flex-col items-center justify-center py-32 gap-3">
+        <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
+        <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Carregando Resumo Executivo...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-8 p-8">
-      {/* Enhanced Header with Action Button */}
-      <div className="flex flex-col md:flex-row items-center justify-between bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl shadow-slate-100/50 gap-6">
-        <div className="flex items-center gap-5">
-          <div className="bg-blue-600 p-4 rounded-2xl shadow-lg shadow-blue-200">
-            <Activity className="w-8 h-8 text-white" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-black text-slate-800 tracking-tight">Painel Executivo</h1>
-            <p className="text-slate-400 font-bold text-xs uppercase tracking-[0.2em] flex items-center gap-2">
-              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-              Sincronização Ativa • T&P-MAO
-            </p>
-          </div>
-        </div>
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
 
-        <button 
-          onClick={() => onNavigate('timer')}
-          className="bg-slate-900 hover:bg-blue-600 text-white group flex items-center gap-4 py-4 px-10 rounded-2xl transition-all shadow-xl shadow-slate-200 active:scale-95"
+      {/* ── Topo: Título + Botão Atualizar ── */}
+      <div className="flex justify-between items-center bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+        <div>
+          <h1 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+            <Activity className="w-6 h-6 text-blue-600" />
+            Resumo Geral de Cronometragem
+          </h1>
+          <p className="text-xs text-slate-400 font-semibold mt-0.5">
+            Acompanhamento em tempo real da medição de T&amp;P por analista e por modelo
+          </p>
+        </div>
+        <button
+          onClick={loadData}
+          className="p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl transition-all border border-slate-200 flex items-center gap-2 text-xs font-bold"
         >
-          <div className="flex flex-col items-start leading-tight">
-            <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Novo Mapeamento</span>
-            <span className="text-base font-bold">Iniciar Cronômetro</span>
-          </div>
-          <div className="bg-white/10 p-2 rounded-xl group-hover:bg-white group-hover:text-blue-600 transition-colors">
-            <Play className="w-5 h-5 fill-current" />
-          </div>
+          <RefreshCw className="w-4 h-4 text-slate-500" />
+          <span>Atualizar</span>
         </button>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-        <StatCard icon={<Layers className="w-5 h-5" />} label="Atividades Totais" value={stats.total} subValue="Itens Identificados" color="blue" />
-        <StatCard icon={<CheckCircle2 className="w-5 h-5" />} label="Realizados" value={stats.completed} subValue={`${stats.percentOk.toFixed(1)}% Coberto`} color="green" />
-        <StatCard icon={<Clock className="w-5 h-5" />} label="Pendentes" value={stats.pending} subValue={`${stats.percentPending.toFixed(1)}% Espera`} color="amber" />
-        <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Evolução" value={`${stats.percentOk.toFixed(1)}%`} subValue="Realizado" color="indigo" isPercent />
-        <StatCard icon={<Target className="w-5 h-5" />} label="Status" value={stats.percentOk > 80 ? 'Excelente' : 'Em Progresso'} subValue="Qualidade dos Dados" color="rose" />
+      {/* ── KPI Cards do Topo ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Total SKUs */}
+        <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+            <Boxes className="w-6 h-6" />
+          </div>
+          <div>
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total de SKUs</span>
+            <p className="text-2xl font-black text-slate-800 font-mono leading-tight">{data.stats.total.toLocaleString()}</p>
+          </div>
+        </div>
+
+        {/* Mapeados (Concluídos) */}
+        <div className="bg-white p-5 rounded-3xl border border-emerald-100 shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
+            <CheckCircle2 className="w-6 h-6" />
+          </div>
+          <div>
+            <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Concluídos</span>
+            <div className="flex items-baseline gap-2">
+              <p className="text-2xl font-black text-slate-800 font-mono leading-tight">{data.stats.concluidos.toLocaleString()}</p>
+              <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
+                {percentConcluido}%
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Em Andamento */}
+        <div className="bg-white p-5 rounded-3xl border border-amber-100 shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
+            <Clock className="w-6 h-6" />
+          </div>
+          <div>
+            <span className="text-[10px] font-black uppercase tracking-widest text-amber-600">Em Andamento</span>
+            <p className="text-2xl font-black text-slate-800 font-mono leading-tight">{data.stats.andamento.toLocaleString()}</p>
+          </div>
+        </div>
+
+        {/* Pendentes */}
+        <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center flex-shrink-0">
+            <TrendingUp className="w-6 h-6" />
+          </div>
+          <div>
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Pendentes</span>
+            <p className="text-2xl font-black text-slate-700 font-mono leading-tight">{data.stats.pendentes.toLocaleString()}</p>
+          </div>
+        </div>
       </div>
 
-      {/* Progress Bars */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-              <BarChart3 className="w-6 h-6 text-blue-600" />
-              Progresso por Processo
-            </h2>
-            <button onClick={() => onNavigate('spreadsheet')} className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline flex items-center gap-1">
-              Ver Planilha Completa <ArrowRight className="w-3 h-3" />
-            </button>
+      {/* ── SEÇÃO 1: PRODUTIVIDADE POR ANALISTA ── */}
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-black text-slate-800 tracking-tight">Produtividade por Analista</h2>
+              <p className="text-xs text-slate-400">Itens mapeados hoje e acumulado total por controlador de T&amp;P</p>
+            </div>
           </div>
-          <div className="bg-white rounded-[2rem] shadow-xl shadow-slate-100 border border-slate-100 p-8 space-y-7">
-            {processSummaries.map((proc) => (
-              <div key={proc.id} className="group">
-                <div className="flex justify-between items-end mb-2.5">
-                  <div>
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">{proc.total} PONTOS DE MEDIÇÃO</p>
-                    <p className="text-sm font-bold text-slate-700 group-hover:text-blue-600 transition-colors">{proc.name}</p>
+        </div>
+
+        {data.analistas.length === 0 ? (
+          <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl">
+            <Award className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+            <p className="text-sm font-bold text-slate-500">Nenhum item mapeado registrado ainda</p>
+            <p className="text-xs text-slate-400">As medições feitas na tela de Mapeamento aparecerão agrupadas por analista aqui.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {data.analistas.map((an, idx) => (
+              <motion.div
+                key={an.nome}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.05 }}
+                className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-sm"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-full bg-blue-600 text-white font-black text-base flex items-center justify-center shadow-md">
+                      {an.nome.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-sm leading-tight">{an.nome}</h3>
+                      <span className="text-[10px] font-semibold text-slate-400">Controlador de T&amp;P</span>
+                    </div>
                   </div>
+
                   <div className="text-right">
-                    <p className="text-lg font-black text-slate-800">{proc.percent.toFixed(0)}%</p>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase">{proc.completed} de {proc.total} OK</p>
+                    <span className="text-[10px] font-black uppercase text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
+                      Projeção
+                    </span>
+                    <p className="text-xs font-black text-slate-700 font-mono mt-0.5">
+                      ~{an.capacidadeEstimadaDia} itens/dia
+                    </p>
                   </div>
                 </div>
-                <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-100 p-0.5">
-                  <div 
-                    className={`h-full rounded-full transition-all duration-1000 ease-out shadow-sm ${proc.percent === 100 ? 'bg-emerald-500 shadow-emerald-200' : 'bg-blue-600 shadow-blue-200'}`}
-                    style={{ width: `${proc.percent}%` }}
-                  />
+
+                {/* Métricas Principais */}
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/60">
+                  <div className="bg-white p-2.5 rounded-xl text-center border border-slate-100">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Hoje</span>
+                    <span className="text-base font-black text-emerald-600 font-mono">{an.hoje}</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl text-center border border-slate-100">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Total Mapeado</span>
+                    <span className="text-base font-black text-blue-600 font-mono">{an.total}</span>
+                  </div>
                 </div>
-              </div>
+
+                {/* Indicadores de Tempo & Ritmo A -> B -> C */}
+                <div className="bg-white p-3 rounded-xl border border-slate-100 space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-500 font-semibold flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-blue-500" />
+                      Tempo Médio da Peça:
+                    </span>
+                    <span className="font-black text-slate-800 font-mono">
+                      {an.mediaTempo ? an.mediaTempo + 's' : '—'}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-xs pt-1.5 border-t border-slate-100">
+                    <span className="text-slate-500 font-semibold flex items-center gap-1" title="Ritmo médio de ciclo entre conclusões do Item A -> B -> C">
+                      <TrendingUp className="w-3.5 h-3.5 text-orange-500" />
+                      Ritmo (Item A ➔ B):
+                    </span>
+                    <span className="font-black text-orange-600 font-mono">
+                      {an.tempoMedioCicloMin ? an.tempoMedioCicloMin + ' min/item' : '—'}
+                    </span>
+                  </div>
+                </div>
+              </motion.div>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* ── SEÇÃO 2: RESUMO POR MODELO ── */}
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center">
+              <Boxes className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-black text-slate-800 tracking-tight">Resumo por Modelo de Motocicleta</h2>
+              <p className="text-xs text-slate-400">Status dos SKUs agrupados por modelo do galpão</p>
+            </div>
+          </div>
         </div>
 
-        {/* Right Action Column */}
-        <div className="space-y-6">
-           <div className="bg-slate-900 rounded-[2rem] p-8 text-white shadow-2xl relative overflow-hidden group cursor-pointer" onClick={() => onNavigate('timer')}>
-              <div className="relative z-10">
-                <p className="text-blue-400 font-black uppercase tracking-widest text-[9px] mb-2">Ação Sugerida</p>
-                <h3 className="text-xl font-bold mb-4 leading-tight group-hover:text-blue-300 transition-colors">Capture novos tempos agora.</h3>
-                <p className="text-slate-400 text-xs leading-relaxed mb-6">
-                  Existem {stats.pending} atividades pendentes de medição. Use o cronômetro para atualizar a base.
-                </p>
-                <div className="flex items-center gap-2 text-xs font-bold text-white group-hover:translate-x-2 transition-transform">
-                   Acessar Lista de Processos <ArrowRight className="w-4 h-4" />
-                </div>
-              </div>
-              <Play className="w-32 h-32 text-slate-800 absolute -bottom-8 -right-8 opacity-40 group-hover:scale-110 transition-transform" />
-           </div>
-
-           <div className="bg-blue-600 rounded-[2rem] p-8 text-white shadow-xl shadow-blue-200">
-              <h3 className="text-base font-bold mb-6 flex items-center gap-2">
-                <AlertCircle className="w-5 h-5" />
-                Resumo de Pendências
-              </h3>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                  <span className="text-[11px] font-bold opacity-80 uppercase tracking-wider">Aguardando Coleta</span>
-                  <span className="text-lg font-black">{stats.pending}</span>
-                </div>
-                <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                  <span className="text-[11px] font-bold opacity-80 uppercase tracking-wider">Última Atualização</span>
-                  <span className="text-[11px] font-bold">Hoje</span>
-                </div>
-              </div>
-           </div>
-        </div>
+        {data.modelos.length === 0 ? (
+          <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl">
+            <p className="text-sm font-bold text-slate-500">Nenhum modelo cadastrado na base</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-100 text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                  <th className="py-3 px-4">Modelo</th>
+                  <th className="py-3 px-4 text-center">Total SKUs</th>
+                  <th className="py-3 px-4 text-center">Concluídos</th>
+                  <th className="py-3 px-4 text-center">Em Andamento</th>
+                  <th className="py-3 px-4 text-center">Pendentes</th>
+                  <th className="py-3 px-4">Progresso do Modelo</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs">
+                {data.modelos.map((m) => (
+                  <tr key={m.modelo} className="hover:bg-slate-50/80 transition-colors">
+                    <td className="py-3 px-4 font-black font-mono text-slate-800 text-sm">
+                      {m.modelo}
+                    </td>
+                    <td className="py-3 px-4 text-center font-bold text-slate-700 font-mono">
+                      {m.total}
+                    </td>
+                    <td className="py-3 px-4 text-center font-bold text-emerald-600 font-mono">
+                      {m.mapeados}
+                    </td>
+                    <td className="py-3 px-4 text-center font-bold text-amber-600 font-mono">
+                      {m.andamento}
+                    </td>
+                    <td className="py-3 px-4 text-center font-bold text-slate-400 font-mono">
+                      {m.pendentes}
+                    </td>
+                    <td className="py-3 px-4 min-w-[180px]">
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 bg-slate-100 h-2 rounded-full overflow-hidden">
+                          <div
+                            className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                            style={{ width: `${m.percent}%` }}
+                          />
+                        </div>
+                        <span className="font-bold text-xs text-slate-600 font-mono w-10 text-right">
+                          {m.percent}%
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
 
-function StatCard({ icon, label, value, subValue, color }: any) {
-  const colors: any = {
-    blue: 'bg-blue-50 text-blue-600 border-blue-100 shadow-blue-100/30',
-    green: 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-emerald-100/30',
-    amber: 'bg-amber-50 text-amber-600 border-amber-100 shadow-amber-100/30',
-    indigo: 'bg-indigo-50 text-indigo-600 border-indigo-100 shadow-indigo-100/30',
-    rose: 'bg-rose-50 text-rose-600 border-rose-100 shadow-rose-100/30'
-  };
-
-  return (
-    <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-xl shadow-slate-100/50 hover:translate-y-[-4px] transition-all">
-      <div className={`w-10 h-10 rounded-xl ${colors[color]} border flex items-center justify-center mb-4`}>
-        {icon}
-      </div>
-      <p className="text-slate-400 font-black uppercase tracking-widest text-[8px] mb-1">{label}</p>
-      <h3 className="text-2xl font-black text-slate-800 tracking-tight">{value}</h3>
-      <p className="text-slate-400 font-bold text-[9px] uppercase mt-1">{subValue}</p>
     </div>
   );
 }

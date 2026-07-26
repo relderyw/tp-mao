@@ -6,11 +6,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   LogOut, Activity, BarChart3, Settings as SettingsIcon,
-  Table, Eye, EyeOff, Users, Clock, Package
+  Table, Eye, EyeOff, Users, Clock, Package, ScanLine
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
-import TimerSession from './components/TimerSession';
+import MappingWorkspace from './components/MappingWorkspace';
 import ProcessManager from './components/ProcessManager';
 import Reports from './components/Reports';
 import SpreadsheetView from './components/SpreadsheetView';
@@ -24,6 +24,7 @@ import {
 } from './lib/auth';
 import { mappingService } from './lib/mappingService';
 import { InventoryConsultation } from './components/InventoryConsultation';
+import CheckKD from './components/CheckKD';
 
 // ─── Login Screen ─────────────────────────────────────────────────────────────
 function LoginScreen({ onLogin }: { onLogin: (user: AppUser) => void }) {
@@ -154,7 +155,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: AppUser) => void }) {
 }
 
 // ─── App Shell ────────────────────────────────────────────────────────────────
-type TabId = 'dashboard' | 'timer' | 'processes' | 'reports' | 'spreadsheet' | 'users' | 'inventory';
+type TabId = 'dashboard' | 'timer' | 'processes' | 'reports' | 'spreadsheet' | 'users' | 'inventory' | 'check';
 
 function AppContent() {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getSession());
@@ -192,10 +193,8 @@ function AppContent() {
 
   const tabs = [
     { id: 'dashboard',   label: 'Dashboard',  icon: Activity },
-    { id: 'inventory',   label: 'Consulta',   icon: Package },
-    { id: 'processes',   label: 'Processos',  icon: SettingsIcon },
-    { id: 'spreadsheet', label: 'Planilha',   icon: Table },
-    { id: 'reports',     label: 'Histórico',  icon: BarChart3 },
+    { id: 'timer',       label: 'Mapeamento', icon: Clock },
+    { id: 'check',       label: 'Check KD',   icon: ScanLine },
     ...(isAdmin ? [
       { id: 'users', label: 'Usuários', icon: Users }
     ] : []),
@@ -296,33 +295,24 @@ function AppContent() {
           >
             {activeTab === 'dashboard' && (
               <Dashboard 
-                onStartProcess={startTimer} 
                 onNavigate={(tab: TabId) => setActiveTab(tab)} 
               />
             )}
             {activeTab === 'timer' && (
-              <TimerSession
-                processId={selectedProcessId || ''}
-                onClose={() => {
-                  setActiveTab('dashboard');
-                  setSelectedProcessId(null);
-                }}
-                onSelectProcess={(id) => setSelectedProcessId(id)}
+              <MappingWorkspace
+                initialSku={selectedProcessId || undefined}
               />
             )}
-            {activeTab === 'processes' && <ProcessManager />}
-            {activeTab === 'spreadsheet' && <SpreadsheetView />}
-            {activeTab === 'reports' && <Reports />}
+            {activeTab === 'check' && (
+              <CheckKD
+                onStartTimer={(sku) => {
+                  setSelectedProcessId(sku);
+                  setActiveTab('timer');
+                }}
+              />
+            )}
             {activeTab === 'users' && isAdmin && (
               <UsersTab currentUser={currentUser} />
-            )}
-            {activeTab === 'inventory' && (
-              <InventoryConsultation 
-                onStartProcess={(pid) => {
-                  setActiveTab('timer');
-                  setSelectedProcessId(pid);
-                }} 
-              />
             )}
           </motion.div>
         </AnimatePresence>
