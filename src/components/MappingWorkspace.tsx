@@ -93,11 +93,25 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
   const [time, setTime] = useState<number>(0);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const timerRef = useRef<number | null>(null);
-  const startTimeRef = useRef<number>(0); // Date.now() de quando o timer começou
-  const timeRef = useRef<number>(0);       // espelho de `time` para leitura sem closure stale
+  const startTimeRef = useRef<number>(0);
+  const timeRef = useRef<number>(0);
 
   // Mantém timeRef sempre sincronizado com time
   useEffect(() => { timeRef.current = time; }, [time]);
+
+  // Estado dos campos adicionais do item (FORN. + DCC-AÇAÍ + FORMATAR específicos)
+  const [itemInfo, setItemInfo] = useState({
+    pecas_kd: '' as string,
+    tp_emb_forn: '' as string,
+    pd_emb_forn: '' as string,
+    tp_emb_dcc: '' as string,
+    pd_emb_dcc: '' as string,
+    carro: '' as string,
+    form_unid: '' as string,
+    form_qtd: '' as string,
+  });
+  const [savingInfo, setSavingInfo] = useState(false);
+  const [infoSaved, setInfoSaved] = useState(false);
 
   // Carregar SKUs e estatísticas
   useEffect(() => {
@@ -126,6 +140,48 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
   };
 
   const selectedSku = skus[selectedSkuIndex] || null;
+
+  // Sincroniza itemInfo quando troca de SKU
+  useEffect(() => {
+    if (selectedSku) {
+      setItemInfo({
+        pecas_kd: selectedSku.pecas_kd != null ? String(selectedSku.pecas_kd) : '',
+        tp_emb_forn: selectedSku.tp_emb_forn || '',
+        pd_emb_forn: selectedSku.pd_emb_forn || '',
+        tp_emb_dcc: selectedSku.tp_emb_dcc || '',
+        pd_emb_dcc: selectedSku.pd_emb_dcc || '',
+        carro: selectedSku.carro || '',
+        form_unid: selectedSku.form_unid || '',
+        form_qtd: selectedSku.form_qtd != null ? String(selectedSku.form_qtd) : '',
+      });
+      setInfoSaved(false);
+    }
+  }, [selectedSkuIndex, skus]);
+
+  // Salva os campos adicionais do item
+  const saveItemInfo = async () => {
+    if (!selectedSku) return;
+    setSavingInfo(true);
+    const fields: Partial<SkuTp> = {
+      pecas_kd: itemInfo.pecas_kd !== '' ? Number(itemInfo.pecas_kd) : null,
+      tp_emb_forn: itemInfo.tp_emb_forn || null,
+      pd_emb_forn: itemInfo.pd_emb_forn || null,
+      tp_emb_dcc: itemInfo.tp_emb_dcc || null,
+      pd_emb_dcc: itemInfo.pd_emb_dcc || null,
+      carro: itemInfo.carro || null,
+      form_unid: itemInfo.form_unid || null,
+      form_qtd: itemInfo.form_qtd !== '' ? Number(itemInfo.form_qtd) : null,
+    };
+    const updated = await saveSubProcessMeasurements(selectedSku.sku, fields, operatorName);
+    if (updated) {
+      const newSkus = [...skus];
+      newSkus[selectedSkuIndex] = updated;
+      setSkus(newSkus);
+      setInfoSaved(true);
+      setTimeout(() => setInfoSaved(false), 2000);
+    }
+    setSavingInfo(false);
+  };
 
   // Lógica do cronômetro — NÃO inclui `time` nas dependências para não recriar o interval a cada tick
   useEffect(() => {
@@ -456,6 +512,137 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
               <ChevronRight className="w-5 h-5" />
             </button>
           </div>
+
+          {/* ── CARD: Informações do Item ── */}
+          {selectedSku && (
+            <div className="bg-[#181b22] border border-slate-800/80 rounded-3xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-black text-slate-300 uppercase tracking-widest flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-slate-400" />
+                  Informações do Item
+                </h3>
+                <button
+                  onClick={saveItemInfo}
+                  disabled={savingInfo}
+                  className={`px-4 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
+                    infoSaved
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                      : 'bg-orange-500 hover:bg-orange-400 text-white shadow-lg'
+                  }`}
+                >
+                  {savingInfo ? <Loader2 className="w-3 h-3 animate-spin" /> : infoSaved ? <CheckCircle2 className="w-3 h-3" /> : <Save className="w-3 h-3" />}
+                  {infoSaved ? 'Salvo!' : 'Salvar'}
+                </button>
+              </div>
+
+              {/* FORN. */}
+              <div>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Fornecedor (FORN.)</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-[10px] text-slate-500 font-bold block mb-1">Peças no KD</label>
+                    <input
+                      type="number"
+                      value={itemInfo.pecas_kd}
+                      onChange={e => setItemInfo(p => ({ ...p, pecas_kd: e.target.value }))}
+                      placeholder="0"
+                      className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-orange-500 transition-colors font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 font-bold block mb-1">TP_Emb Forn.</label>
+                    <input
+                      type="text"
+                      value={itemInfo.tp_emb_forn}
+                      onChange={e => setItemInfo(p => ({ ...p, tp_emb_forn: e.target.value }))}
+                      placeholder="Tipo..."
+                      className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-orange-500 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 font-bold block mb-1">PD_Emb Forn.</label>
+                    <input
+                      type="text"
+                      value={itemInfo.pd_emb_forn}
+                      onChange={e => setItemInfo(p => ({ ...p, pd_emb_forn: e.target.value }))}
+                      placeholder="Padrão..."
+                      className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-orange-500 transition-colors"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* DCC-AÇAÍ */}
+              <div>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">DCC-AÇAÍ</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-[10px] text-slate-500 font-bold block mb-1">TP_Emb DCC</label>
+                    <select
+                      value={itemInfo.tp_emb_dcc}
+                      onChange={e => setItemInfo(p => ({ ...p, tp_emb_dcc: e.target.value }))}
+                      className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-orange-500 transition-colors appearance-none cursor-pointer"
+                    >
+                      <option value="">Selecionar...</option>
+                      {['CARRO','IK05','IK10','IK33','SACO P.','MARFINITE','CAIXA','CAIXA MADEIRA','ROLO','SACO RAFIA','-'].map(o => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 font-bold block mb-1">PD_Emb DCC</label>
+                    <input
+                      type="text"
+                      value={itemInfo.pd_emb_dcc}
+                      onChange={e => setItemInfo(p => ({ ...p, pd_emb_dcc: e.target.value }))}
+                      placeholder="Padrão..."
+                      className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-orange-500 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 font-bold block mb-1">Carro</label>
+                    <input
+                      type="text"
+                      value={itemInfo.carro}
+                      onChange={e => setItemInfo(p => ({ ...p, carro: e.target.value }))}
+                      placeholder="Carro..."
+                      className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-orange-500 transition-colors"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* FORMATAR específicos */}
+              <div>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Formatar — Configuração</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-slate-500 font-bold block mb-1">Uni. Med.</label>
+                    <select
+                      value={itemInfo.form_unid}
+                      onChange={e => setItemInfo(p => ({ ...p, form_unid: e.target.value }))}
+                      className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 transition-colors appearance-none cursor-pointer"
+                    >
+                      <option value="">Selecionar...</option>
+                      {['PEÇA','CAIXA','CARRO','SACO P.','IK'].map(o => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 font-bold block mb-1">QTD</label>
+                    <input
+                      type="number"
+                      value={itemInfo.form_qtd}
+                      onChange={e => setItemInfo(p => ({ ...p, form_qtd: e.target.value }))}
+                      placeholder="0"
+                      className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-emerald-500 transition-colors font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Accordion dos 5 Sub-processos */}
           <div className="space-y-3">

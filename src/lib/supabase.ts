@@ -51,6 +51,13 @@ export interface SkuTp {
   // Sub-processo 6: POSICIONAR IK
   pos_t1?: number | null; pos_t2?: number | null; pos_t3?: number | null; pos_t4?: number | null; pos_t5?: number | null;
   pos_qtd?: number | null; pos_res?: number | null;
+  // Informações adicionais do item
+  pecas_kd?: number | null;         // Peças no KD
+  tp_emb_forn?: string | null;      // Tipo Embalagem Fornecedor
+  pd_emb_forn?: string | null;      // Padrão Embalagem Fornecedor
+  tp_emb_dcc?: string | null;       // Tipo Embalagem DCC (CARRO, IK05, IK10...)
+  pd_emb_dcc?: string | null;       // Padrão Embalagem DCC
+  carro?: string | null;            // Carro
   // Resultado
   tempo_total?: number | null;
   status: 'pendente' | 'andamento' | 'mapeado';
