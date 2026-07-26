@@ -15,8 +15,17 @@ interface MappingWorkspaceProps {
   onClose?: () => void;
 }
 
-// Configuração dos 5 sub-processos padrão com 5 tomadas cada (t1 a t5)
+// Configuração dos 6 sub-processos na ordem exata solicitada com 5 tomadas cada (t1 a t5)
 const PROCESS_CONFIGS = [
+  {
+    id: 'pegar_ik',
+    title: 'Pegar IK',
+    borderColor: 'border-cyan-500',
+    bgColor: 'bg-cyan-500/10',
+    textColor: 'text-cyan-400',
+    btnColor: 'bg-cyan-500 hover:bg-cyan-600',
+    t1Key: 'pegar_ik_t1', t2Key: 'pegar_ik_t2', t3Key: 'pegar_ik_t3', t4Key: 'pegar_ik_t4', t5Key: 'pegar_ik_t5', resKey: 'pegar_ik_res'
+  },
   {
     id: 'abrir',
     title: 'Pegar e abrir caixa',
@@ -28,7 +37,7 @@ const PROCESS_CONFIGS = [
   },
   {
     id: 'form',
-    title: 'Formatagem',
+    title: 'Formatar',
     borderColor: 'border-emerald-500',
     bgColor: 'bg-emerald-500/10',
     textColor: 'text-emerald-400',
@@ -37,7 +46,7 @@ const PROCESS_CONFIGS = [
   },
   {
     id: 'desc',
-    title: 'Descartar resíduos',
+    title: 'Descartar Residuo (caixa)',
     borderColor: 'border-purple-500',
     bgColor: 'bg-purple-500/10',
     textColor: 'text-purple-400',
@@ -46,7 +55,7 @@ const PROCESS_CONFIGS = [
   },
   {
     id: 'etq',
-    title: 'Colar etiqueta',
+    title: 'Colar Etiqueta',
     borderColor: 'border-blue-500',
     bgColor: 'bg-blue-500/10',
     textColor: 'text-blue-400',

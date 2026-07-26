@@ -307,10 +307,19 @@ export async function saveSubProcessMeasurements(
     .eq('sku', sku)
     .single();
 
-  const currentTp = current || { sku, status: 'pendente' };
-  const merged = { ...currentTp, ...updateFields, responsavel: operatorName, updated_at: new Date().toISOString() };
+  const now = new Date();
+  const dataMapStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR');
 
-  const spKeys = ['abrir_t1', 'form_t1', 'desc_t1', 'etq_t1', 'pos_t1', 'pegar_ik_t1'];
+  const currentTp = current || { sku, status: 'pendente' };
+  const merged = {
+    ...currentTp,
+    ...updateFields,
+    responsavel: operatorName,
+    data_map: dataMapStr,
+    updated_at: now.toISOString()
+  };
+
+  const spKeys = ['pegar_ik_t1', 'abrir_t1', 'form_t1', 'desc_t1', 'etq_t1', 'pos_t1'];
   const hasSome = spKeys.some(k => merged[k as keyof SkuTp] != null);
   const hasAll = spKeys.every(k => merged[k as keyof SkuTp] != null);
 
