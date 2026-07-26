@@ -34,22 +34,22 @@ export interface SkuTp {
   data_map?: string;
   updated_at?: string;
   // Sub-processo 1: PEGAR IK
-  pegar_ik_t1?: number | null; pegar_ik_t2?: number | null; pegar_ik_t3?: number | null;
+  pegar_ik_t1?: number | null; pegar_ik_t2?: number | null; pegar_ik_t3?: number | null; pegar_ik_t4?: number | null; pegar_ik_t5?: number | null;
   pegar_ik_qtd?: number | null; pegar_ik_res?: number | null;
   // Sub-processo 2: ABRIR CAIXA
-  abrir_t1?: number | null; abrir_t2?: number | null; abrir_t3?: number | null;
+  abrir_t1?: number | null; abrir_t2?: number | null; abrir_t3?: number | null; abrir_t4?: number | null; abrir_t5?: number | null;
   abrir_qtd?: number | null; abrir_res?: number | null;
   // Sub-processo 3: FORMATAR
-  form_t1?: number | null; form_t2?: number | null; form_t3?: number | null;
+  form_t1?: number | null; form_t2?: number | null; form_t3?: number | null; form_t4?: number | null; form_t5?: number | null;
   form_unid?: string | null; form_qtd?: number | null; form_res?: number | null;
   // Sub-processo 4: DESCARTAR
-  desc_t1?: number | null; desc_t2?: number | null; desc_t3?: number | null;
+  desc_t1?: number | null; desc_t2?: number | null; desc_t3?: number | null; desc_t4?: number | null; desc_t5?: number | null;
   desc_qtd?: number | null; desc_res?: number | null;
   // Sub-processo 5: ETIQUETA
-  etq_t1?: number | null; etq_t2?: number | null; etq_t3?: number | null;
+  etq_t1?: number | null; etq_t2?: number | null; etq_t3?: number | null; etq_t4?: number | null; etq_t5?: number | null;
   etq_qtd?: number | null; etq_res?: number | null;
   // Sub-processo 6: POSICIONAR IK
-  pos_t1?: number | null; pos_t2?: number | null; pos_t3?: number | null;
+  pos_t1?: number | null; pos_t2?: number | null; pos_t3?: number | null; pos_t4?: number | null; pos_t5?: number | null;
   pos_qtd?: number | null; pos_res?: number | null;
   // Resultado
   tempo_total?: number | null;

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Search, ChevronLeft, ChevronRight, Play, Pause, Save, RotateCcw,
-  CheckCircle2, Clock, AlertCircle, Loader2, Sparkles, User, RefreshCw
+  CheckCircle2, Clock, AlertCircle, Loader2, Sparkles, User, RefreshCw,
+  Zap, FastForward, ArrowDownRight, Layers
 } from 'lucide-react';
 import {
   getSkusList, getStatsTp, saveSubProcessMeasurements, SkuTp, StatsTp
@@ -14,7 +15,7 @@ interface MappingWorkspaceProps {
   onClose?: () => void;
 }
 
-// Configuração dos 5 sub-processos padrão com cores combinando com o layout
+// Configuração dos 5 sub-processos padrão com 5 tomadas cada (t1 a t5)
 const PROCESS_CONFIGS = [
   {
     id: 'abrir',
@@ -23,7 +24,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-orange-500/10',
     textColor: 'text-orange-400',
     btnColor: 'bg-orange-500 hover:bg-orange-600',
-    t1Key: 'abrir_t1', t2Key: 'abrir_t2', t3Key: 'abrir_t3', resKey: 'abrir_res'
+    t1Key: 'abrir_t1', t2Key: 'abrir_t2', t3Key: 'abrir_t3', t4Key: 'abrir_t4', t5Key: 'abrir_t5', resKey: 'abrir_res'
   },
   {
     id: 'form',
@@ -32,7 +33,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-emerald-500/10',
     textColor: 'text-emerald-400',
     btnColor: 'bg-emerald-500 hover:bg-emerald-600',
-    t1Key: 'form_t1', t2Key: 'form_t2', t3Key: 'form_t3', resKey: 'form_res'
+    t1Key: 'form_t1', t2Key: 'form_t2', t3Key: 'form_t3', t4Key: 'form_t4', t5Key: 'form_t5', resKey: 'form_res'
   },
   {
     id: 'desc',
@@ -41,7 +42,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-purple-500/10',
     textColor: 'text-purple-400',
     btnColor: 'bg-purple-500 hover:bg-purple-600',
-    t1Key: 'desc_t1', t2Key: 'desc_t2', t3Key: 'desc_t3', resKey: 'desc_res'
+    t1Key: 'desc_t1', t2Key: 'desc_t2', t3Key: 'desc_t3', t4Key: 'desc_t4', t5Key: 'desc_t5', resKey: 'desc_res'
   },
   {
     id: 'etq',
@@ -50,7 +51,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-blue-500/10',
     textColor: 'text-blue-400',
     btnColor: 'bg-blue-500 hover:bg-blue-600',
-    t1Key: 'etq_t1', t2Key: 'etq_t2', t3Key: 'etq_t3', resKey: 'etq_res'
+    t1Key: 'etq_t1', t2Key: 'etq_t2', t3Key: 'etq_t3', t4Key: 'etq_t4', t5Key: 'etq_t5', resKey: 'etq_res'
   },
   {
     id: 'pos',
@@ -59,7 +60,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-amber-500/10',
     textColor: 'text-amber-400',
     btnColor: 'bg-amber-500 hover:bg-amber-600',
-    t1Key: 'pos_t1', t2Key: 'pos_t2', t3Key: 'pos_t3', resKey: 'pos_res'
+    t1Key: 'pos_t1', t2Key: 'pos_t2', t3Key: 'pos_t3', t4Key: 'pos_t4', t5Key: 'pos_t5', resKey: 'pos_res'
   }
 ] as const;
 
@@ -74,7 +75,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
   const [loadingSkus, setLoadingSkus] = useState(true);
 
   // Estatísticas do painel
-  const [stats, setStats] = useState<StatsTp>({ total: 8600, concluidos: 0, andamento: 0, pendentes: 8600 });
+  const [stats, setStats] = useState<StatsTp>({ total: 8643, concluidos: 0, andamento: 0, pendentes: 8643 });
 
   // Estado do sub-processo ativo
   const [activeProcessId, setActiveProcessId] = useState<string>('abrir');
@@ -125,6 +126,11 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [isRunning, time]);
 
+  const resetTimer = () => {
+    setTime(0);
+    setIsRunning(false);
+  };
+
   // Trocar de SKU (setas ← →)
   const handlePrevSku = () => {
     if (selectedSkuIndex > 0) {
@@ -140,31 +146,39 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     }
   };
 
-  const resetTimer = () => {
-    setTime(0);
-    setIsRunning(false);
-  };
+  // ── Gravar tomada para um sub-processo específico ──────────────────────────
+  const recordTimeToProcess = async (
+    procConfig: typeof PROCESS_CONFIGS[number],
+    customTimeSec?: number,
+    keepRunningAfter: boolean = false
+  ) => {
+    if (!selectedSku) return null;
+    const timeToRecord = customTimeSec !== undefined ? customTimeSec : time;
+    if (timeToRecord === 0) return null;
 
-  // Gravar tomada para o sub-processo ativo
-  const handleRecordTime = async (procConfig: typeof PROCESS_CONFIGS[number]) => {
-    if (!selectedSku || time === 0) return;
+    const tVal = Number(timeToRecord.toFixed(2));
 
-    const tVal = Number(time.toFixed(2));
-
-    // Identifica qual tomada (t1, t2 ou t3) está vaga
+    // Identifica qual tomada (t1 a t5) está vaga
     const t1 = selectedSku[procConfig.t1Key as keyof SkuTp] as number | null;
     const t2 = selectedSku[procConfig.t2Key as keyof SkuTp] as number | null;
+    const t3 = selectedSku[procConfig.t3Key as keyof SkuTp] as number | null;
+    const t4 = selectedSku[procConfig.t4Key as keyof SkuTp] as number | null;
+    const t5 = selectedSku[procConfig.t5Key as keyof SkuTp] as number | null;
 
     let targetKey: string = procConfig.t1Key;
     if (t1 != null && t2 == null) targetKey = procConfig.t2Key;
-    else if (t1 != null && t2 != null) targetKey = procConfig.t3Key;
+    else if (t1 != null && t2 != null && t3 == null) targetKey = procConfig.t3Key;
+    else if (t1 != null && t2 != null && t3 != null && t4 == null) targetKey = procConfig.t4Key;
+    else if (t1 != null && t2 != null && t3 != null && t4 != null && t5 == null) targetKey = procConfig.t5Key;
+    else targetKey = procConfig.t5Key; // Sobrescreve a 5ª se todas preenchidas
 
     const currentT1 = (targetKey === procConfig.t1Key ? tVal : t1) || 0;
     const currentT2 = (targetKey === procConfig.t2Key ? tVal : t2) || 0;
-    const currentT3 = (targetKey === procConfig.t3Key ? tVal : (selectedSku[procConfig.t3Key as keyof SkuTp] as number)) || 0;
+    const currentT3 = (targetKey === procConfig.t3Key ? tVal : t3) || 0;
+    const currentT4 = (targetKey === procConfig.t4Key ? tVal : t4) || 0;
+    const currentT5 = (targetKey === procConfig.t5Key ? tVal : t5) || 0;
 
-    // Média das tomadas preenchidas
-    const validTs = [currentT1, currentT2, currentT3].filter(v => v > 0);
+    const validTs = [currentT1, currentT2, currentT3, currentT4, currentT5].filter(v => v > 0);
     const avg = validTs.length > 0 ? Number((validTs.reduce((a, b) => a + b, 0) / validTs.length).toFixed(2)) : 0;
 
     const fieldsToSave: Partial<SkuTp> = {
@@ -175,13 +189,61 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     const updated = await saveSubProcessMeasurements(selectedSku.sku, fieldsToSave, operatorName);
 
     if (updated) {
-      // Atualiza lista local
       const newSkus = [...skus];
       newSkus[selectedSkuIndex] = updated;
       setSkus(newSkus);
       setStats(await getStatsTp());
+
+      // Verifica se completou as 5 tomadas desse sub-processo -> avança pro próximo sub-processo!
+      const countRecorded = [
+        updated[procConfig.t1Key as keyof SkuTp],
+        updated[procConfig.t2Key as keyof SkuTp],
+        updated[procConfig.t3Key as keyof SkuTp],
+        updated[procConfig.t4Key as keyof SkuTp],
+        updated[procConfig.t5Key as keyof SkuTp]
+      ].filter(v => v != null && (v as number) > 0).length;
+
+      if (countRecorded >= 5) {
+        // Avança automaticamente para o próximo sub-processo na lista
+        const currIdx = PROCESS_CONFIGS.findIndex(p => p.id === procConfig.id);
+        if (currIdx !== -1 && currIdx < PROCESS_CONFIGS.length - 1) {
+          setActiveProcessId(PROCESS_CONFIGS[currIdx + 1].id);
+        }
+      }
     }
 
+    if (keepRunningAfter) {
+      setTime(0);
+      setIsRunning(true);
+    } else {
+      resetTimer();
+    }
+
+    return updated;
+  };
+
+  // ── Botão CICLO (Grava tomada atual e reinicia o cronômetro imediatamente) ──
+  const handleCiclo = async () => {
+    const currentProc = PROCESS_CONFIGS.find(p => p.id === activeProcessId);
+    if (!currentProc || time === 0) return;
+
+    // Grava o tempo atual e MANTÉM O CRONÔMETRO RODANDO (zera e continua)
+    await recordTimeToProcess(currentProc, time, true);
+  };
+
+  // ── Trocar de Sub-processo com auto-salvamento se houver tempo decorrido ──
+  const handleSelectProcess = async (targetProcId: string) => {
+    if (targetProcId === activeProcessId) return;
+
+    // Se houver tempo rodando/decorrido no processo atual, salva automaticamente antes de trocar
+    if (time > 0) {
+      const currentProc = PROCESS_CONFIGS.find(p => p.id === activeProcessId);
+      if (currentProc) {
+        await recordTimeToProcess(currentProc, time, false);
+      }
+    }
+
+    setActiveProcessId(targetProcId);
     resetTimer();
   };
 
@@ -193,6 +255,8 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
       [procConfig.t1Key]: null,
       [procConfig.t2Key]: null,
       [procConfig.t3Key]: null,
+      [procConfig.t4Key]: null,
+      [procConfig.t5Key]: null,
       [procConfig.resKey]: null
     };
 
@@ -201,6 +265,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
       const newSkus = [...skus];
       newSkus[selectedSkuIndex] = updated;
       setSkus(newSkus);
+      resetTimer();
     }
   };
 
@@ -355,11 +420,13 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
             {PROCESS_CONFIGS.map((proc) => {
               const isActive = activeProcessId === proc.id;
 
-              // Extrai as tomadas do SKU para este sub-processo
+              // Extrai as 5 tomadas do SKU para este sub-processo
               const t1 = selectedSku?.[proc.t1Key as keyof SkuTp] as number | null;
               const t2 = selectedSku?.[proc.t2Key as keyof SkuTp] as number | null;
               const t3 = selectedSku?.[proc.t3Key as keyof SkuTp] as number | null;
-              const tomadas = [t1, t2, t3].filter(t => t != null && t > 0);
+              const t4 = selectedSku?.[proc.t4Key as keyof SkuTp] as number | null;
+              const t5 = selectedSku?.[proc.t5Key as keyof SkuTp] as number | null;
+              const tomadas = [t1, t2, t3, t4, t5].filter(t => t != null && t > 0);
               const totalTomadasCount = tomadas.length;
 
               return (
@@ -373,12 +440,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                 >
                   {/* Cabeçalho do Card de Sub-processo */}
                   <button
-                    onClick={() => {
-                      if (!isActive) {
-                        setActiveProcessId(proc.id);
-                        resetTimer();
-                      }
-                    }}
+                    onClick={() => handleSelectProcess(proc.id)}
                     className="w-full flex items-center justify-between p-5 text-left"
                   >
                     <span className={`font-black text-base md:text-lg ${proc.textColor}`}>
@@ -386,7 +448,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                     </span>
                     <div className="flex items-center gap-3">
                       <span className="text-xs font-mono font-bold text-slate-400 bg-slate-800/60 px-3 py-1 rounded-full border border-slate-700/50">
-                        {totalTomadasCount} de 3
+                        {totalTomadasCount} de 5
                       </span>
                     </div>
                   </button>
@@ -403,12 +465,14 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                           {formatSecondsDisplay(time)}
                         </div>
 
-                        {/* Pílulas das tomadas já gravadas: 1T 2.6s | 2T 2.3s | 3T 2.5s */}
-                        <div className="flex items-center justify-center gap-2 mt-4">
+                        {/* Pílulas das 5 tomadas já gravadas: 1T | 2T | 3T | 4T | 5T */}
+                        <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
                           {[
                             { label: '1T', val: t1 },
                             { label: '2T', val: t2 },
-                            { label: '3T', val: t3 }
+                            { label: '3T', val: t3 },
+                            { label: '4T', val: t4 },
+                            { label: '5T', val: t5 }
                           ].map((pill, idx) => (
                             <div
                               key={idx}
@@ -426,10 +490,11 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                       </div>
 
                       {/* Botões Principais de Ação */}
-                      <div className="flex gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                        {/* Botão INICIAR / PAUSAR */}
                         <button
                           onClick={() => setIsRunning(!isRunning)}
-                          className={`flex-1 py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 transition-all shadow-lg active:scale-98 ${
+                          className={`py-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all shadow-lg active:scale-98 ${
                             isRunning
                               ? 'bg-amber-500 text-slate-950 hover:bg-amber-400'
                               : `${proc.btnColor} text-white`
@@ -439,20 +504,35 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                           {isRunning ? 'Pausar' : 'Iniciar'}
                         </button>
 
+                        {/* Botão CICLO (Grava tomada atual e reinicia o cronômetro sem parar) */}
                         <button
-                          onClick={() => handleRecordTime(proc)}
+                          onClick={handleCiclo}
                           disabled={time === 0}
-                          className="px-6 py-4 rounded-2xl font-black text-sm bg-white text-slate-950 hover:bg-slate-100 disabled:opacity-20 transition-all flex items-center gap-2 shadow-lg"
+                          className="py-4 rounded-2xl font-black text-sm bg-gradient-to-r from-orange-500 to-amber-500 text-slate-950 hover:from-orange-400 hover:to-amber-400 disabled:opacity-20 transition-all flex items-center justify-center gap-2 shadow-lg active:scale-98"
+                          title="Grava a tomada atual e já inicia a próxima tomada automaticamente"
+                        >
+                          <Zap className="w-4 h-4 fill-current" />
+                          Ciclo
+                        </button>
+
+                        {/* Botão GRAVAR (Salva e zera) */}
+                        <button
+                          onClick={() => recordTimeToProcess(proc, time, false)}
+                          disabled={time === 0}
+                          className="py-4 rounded-2xl font-black text-sm bg-white text-slate-950 hover:bg-slate-100 disabled:opacity-20 transition-all flex items-center justify-center gap-2 shadow-lg active:scale-98"
                         >
                           <Save className="w-4 h-4" />
                           Gravar
                         </button>
 
+                        {/* Botão REINICIAR / LIMPAR */}
                         <button
-                          onClick={resetTimer}
-                          className="p-4 rounded-2xl bg-slate-800 text-slate-400 hover:text-red-400 hover:bg-slate-700 transition-all border border-slate-700/50"
+                          onClick={() => handleClearProcess(proc)}
+                          className="py-4 rounded-2xl bg-slate-800 text-slate-400 hover:text-red-400 hover:bg-slate-700 transition-all border border-slate-700/50 flex items-center justify-center gap-2 font-bold text-xs"
+                          title="Limpar as 5 tomadas deste sub-processo"
                         >
-                          <RotateCcw className="w-5 h-5" />
+                          <RotateCcw className="w-4 h-4" />
+                          Limpar
                         </button>
                       </div>
                     </div>
