@@ -9,7 +9,7 @@ import {
 import { AppUser } from "../lib/auth";
 import {
   getSkusReport, getUniqueModels, getUniqueAnalysts,
-  SkuTp, SkusReportFilters, supabase
+  SkuTp, SkusReportFilters, supabase, sanitizeSkuTpPayload
 } from "../lib/supabase";
 
 interface ItemsReportProps {
@@ -34,12 +34,12 @@ const PROCESS_COLS = [
 ];
 
 const SUB_PROC_SAMPLES = [
-  { label: "Pegar IK",   bColor: "border-cyan-500/30",     tColor: "text-cyan-400",     keys: ["pegar_ik_t1","pegar_ik_t2","pegar_ik_t3","pegar_ik_t4","pegar_ik_t5"] },
-  { label: "Abrir Cx.",  bColor: "border-orange-500/30",   tColor: "text-orange-400",   keys: ["abrir_t1","abrir_t2","abrir_t3","abrir_t4","abrir_t5"] },
-  { label: "Formatar",   bColor: "border-emerald-500/30",  tColor: "text-emerald-400",  keys: ["form_t1","form_t2","form_t3","form_t4","form_t5"] },
-  { label: "Descartar",  bColor: "border-purple-500/30",   tColor: "text-purple-400",   keys: ["desc_t1","desc_t2","desc_t3","desc_t4","desc_t5"] },
-  { label: "Etiqueta",   bColor: "border-blue-500/30",     tColor: "text-blue-400",     keys: ["etq_t1","etq_t2","etq_t3","etq_t4","etq_t5"] },
-  { label: "Posicionar", bColor: "border-amber-500/30",    tColor: "text-amber-400",    keys: ["pos_t1","pos_t2","pos_t3","pos_t4","pos_t5"] },
+  { label: "Pegar IK",   bColor: "border-cyan-500/30",     tColor: "text-cyan-400",     keys: ["pegar_ik_t1","pegar_ik_t2","pegar_ik_t3"] },
+  { label: "Abrir Cx.",  bColor: "border-orange-500/30",   tColor: "text-orange-400",   keys: ["abrir_t1","abrir_t2","abrir_t3"] },
+  { label: "Formatar",   bColor: "border-emerald-500/30",  tColor: "text-emerald-400",  keys: ["form_t1","form_t2","form_t3"] },
+  { label: "Descartar",  bColor: "border-purple-500/30",   tColor: "text-purple-400",   keys: ["desc_t1","desc_t2","desc_t3"] },
+  { label: "Etiqueta",   bColor: "border-blue-500/30",     tColor: "text-blue-400",     keys: ["etq_t1","etq_t2","etq_t3"] },
+  { label: "Posicionar", bColor: "border-amber-500/30",    tColor: "text-amber-400",    keys: ["pos_t1","pos_t2","pos_t3"] },
 ];
 
 const EDIT_PROCESS_FIELDS = [
@@ -161,18 +161,18 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
         }
       }
 
-      const { id, created_at, ...updateFields } = editingItem as any;
-
       const payload = {
-        ...updateFields,
+        ...editingItem,
         data_map: cleanDataMap || null,
         tempo_total: Number(totalTime.toFixed(2)),
         updated_at: new Date().toISOString()
       };
 
+      const cleanPayload = sanitizeSkuTpPayload(payload, true);
+
       const { data, error } = await supabase
         .from("sku_tp")
-        .update(payload)
+        .update(cleanPayload)
         .eq("sku", editingItem.sku)
         .select("*")
         .single();

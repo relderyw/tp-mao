@@ -34,33 +34,56 @@ export interface SkuTp {
   data_map?: string;
   updated_at?: string;
   // Sub-processo 1: PEGAR IK
-  pegar_ik_t1?: number | null; pegar_ik_t2?: number | null; pegar_ik_t3?: number | null; pegar_ik_t4?: number | null; pegar_ik_t5?: number | null;
+  pegar_ik_t1?: number | null; pegar_ik_t2?: number | null; pegar_ik_t3?: number | null;
   pegar_ik_qtd?: number | null; pegar_ik_res?: number | null;
   // Sub-processo 2: ABRIR CAIXA
-  abrir_t1?: number | null; abrir_t2?: number | null; abrir_t3?: number | null; abrir_t4?: number | null; abrir_t5?: number | null;
+  abrir_t1?: number | null; abrir_t2?: number | null; abrir_t3?: number | null;
   abrir_qtd?: number | null; abrir_res?: number | null;
   // Sub-processo 3: FORMATAR
-  form_t1?: number | null; form_t2?: number | null; form_t3?: number | null; form_t4?: number | null; form_t5?: number | null;
+  form_t1?: number | null; form_t2?: number | null; form_t3?: number | null;
   form_unid?: string | null; form_qtd?: number | null; form_res?: number | null;
   // Sub-processo 4: DESCARTAR
-  desc_t1?: number | null; desc_t2?: number | null; desc_t3?: number | null; desc_t4?: number | null; desc_t5?: number | null;
+  desc_t1?: number | null; desc_t2?: number | null; desc_t3?: number | null;
   desc_qtd?: number | null; desc_res?: number | null;
   // Sub-processo 5: ETIQUETA
-  etq_t1?: number | null; etq_t2?: number | null; etq_t3?: number | null; etq_t4?: number | null; etq_t5?: number | null;
+  etq_t1?: number | null; etq_t2?: number | null; etq_t3?: number | null;
   etq_qtd?: number | null; etq_res?: number | null;
   // Sub-processo 6: POSICIONAR IK
-  pos_t1?: number | null; pos_t2?: number | null; pos_t3?: number | null; pos_t4?: number | null; pos_t5?: number | null;
+  pos_t1?: number | null; pos_t2?: number | null; pos_t3?: number | null;
   pos_qtd?: number | null; pos_res?: number | null;
   // Informações adicionais do item
   pecas_kd?: number | null;         // Peças no KD
   tp_emb_forn?: string | null;      // Tipo Embalagem Fornecedor
   pd_emb_forn?: string | null;      // Padrão Embalagem Fornecedor
-  tp_emb_dcc?: string | null;       // Tipo Embalagem DCC (CARRO, IK05, IK10...)
+  tp_emb_dcc?: string | null;       // Tipo Embalagem DCC
   pd_emb_dcc?: string | null;       // Padrão Embalagem DCC
   carro?: string | null;            // Carro
   // Resultado
   tempo_total?: number | null;
   status: 'pendente' | 'andamento' | 'mapeado';
+}
+
+const VALID_SKU_TP_COLUMNS = new Set([
+  'id', 'sku', 'descricao', 'modelo', 'responsavel', 'data_map',
+  'pegar_ik_t1', 'pegar_ik_t2', 'pegar_ik_t3', 'pegar_ik_qtd', 'pegar_ik_res',
+  'abrir_t1', 'abrir_t2', 'abrir_t3', 'abrir_qtd', 'abrir_res',
+  'form_t1', 'form_t2', 'form_t3', 'form_unid', 'form_qtd', 'form_res',
+  'desc_t1', 'desc_t2', 'desc_t3', 'desc_qtd', 'desc_res',
+  'etq_t1', 'etq_t2', 'etq_t3', 'etq_qtd', 'etq_res',
+  'pos_t1', 'pos_t2', 'pos_t3', 'pos_qtd', 'pos_res',
+  'tempo_total', 'status', 'created_at', 'updated_at',
+  'pecas_kd', 'tp_emb_forn', 'pd_emb_forn', 'tp_emb_dcc', 'pd_emb_dcc', 'carro'
+]);
+
+export function sanitizeSkuTpPayload(payload: Record<string, any>, excludeId = true): Record<string, any> {
+  const clean: Record<string, any> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (VALID_SKU_TP_COLUMNS.has(key)) {
+      if (excludeId && (key === 'id' || key === 'created_at')) continue;
+      clean[key] = value;
+    }
+  }
+  return clean;
 }
 
 export interface StatsTp {
@@ -436,9 +459,11 @@ export async function saveSubProcessMeasurements(
   });
   merged.tempo_total = Number(total.toFixed(2));
 
+  const cleanMerged = sanitizeSkuTpPayload(merged, false);
+
   const { data: updated, error } = await supabase
     .from('sku_tp')
-    .upsert(merged, { onConflict: 'sku' })
+    .upsert(cleanMerged, { onConflict: 'sku' })
     .select('*')
     .single();
 
