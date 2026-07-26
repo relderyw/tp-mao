@@ -214,9 +214,11 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
               if (isMounted) {
                 setInputValue(decodedText);
                 buscar(decodedText);
-                setCameraActive(false);
-                // Para a câmera após leitura bem sucedida
-                html5Qrcode.stop().catch(() => {});
+                // Fecha a câmera e muda para a visualização dos resultados
+                setMode('qr');
+                try {
+                  html5Qrcode.stop().catch(() => {});
+                } catch {}
               }
             },
             () => {
