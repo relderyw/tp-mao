@@ -344,28 +344,54 @@ export async function getSkusReport(
   return { data: data || [], total: count || 0 };
 }
 
-/** Busca lista de modelos únicos para o filtro */
+/** Busca lista de modelos únicos para o filtro (paginado para pegar todos os 8.600+ SKUs) */
 export async function getUniqueModels(): Promise<string[]> {
-  const { data, error } = await supabase
-    .from('sku_tp')
-    .select('modelo')
-    .not('modelo', 'is', null)
-    .order('modelo');
-  if (error) return [];
-  const unique = [...new Set((data || []).map(d => d.modelo).filter(Boolean))];
-  return unique;
+  let allModels: string[] = [];
+  let page = 0;
+  let hasMore = true;
+
+  while (hasMore && page < 20) {
+    const { data, error } = await supabase
+      .from('sku_tp')
+      .select('modelo')
+      .not('modelo', 'is', null)
+      .range(page * 1000, (page + 1) * 1000 - 1);
+
+    if (error || !data || data.length === 0) {
+      hasMore = false;
+    } else {
+      data.forEach(d => { if (d.modelo) allModels.push(d.modelo.trim()); });
+      if (data.length < 1000) hasMore = false;
+      else page++;
+    }
+  }
+
+  return [...new Set(allModels)].sort();
 }
 
-/** Busca lista de analistas únicos para o filtro */
+/** Busca lista de analistas únicos para o filtro (paginado para pegar todos os 8.600+ SKUs) */
 export async function getUniqueAnalysts(): Promise<string[]> {
-  const { data, error } = await supabase
-    .from('sku_tp')
-    .select('responsavel')
-    .not('responsavel', 'is', null)
-    .order('responsavel');
-  if (error) return [];
-  const unique = [...new Set((data || []).map(d => d.responsavel).filter(Boolean))];
-  return unique as string[];
+  let allAnalysts: string[] = [];
+  let page = 0;
+  let hasMore = true;
+
+  while (hasMore && page < 20) {
+    const { data, error } = await supabase
+      .from('sku_tp')
+      .select('responsavel')
+      .not('responsavel', 'is', null)
+      .range(page * 1000, (page + 1) * 1000 - 1);
+
+    if (error || !data || data.length === 0) {
+      hasMore = false;
+    } else {
+      data.forEach(d => { if (d.responsavel) allAnalysts.push(d.responsavel.trim()); });
+      if (data.length < 1000) hasMore = false;
+      else page++;
+    }
+  }
+
+  return [...new Set(allAnalysts)].sort();
 }
 
 

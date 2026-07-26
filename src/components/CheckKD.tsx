@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   ScanLine, Search, CheckCircle2, Clock, Play,
   X, AlertCircle, Loader2, Package, RefreshCw,
-  ChevronDown, ChevronUp, Boxes, QrCode, Keyboard
+  ChevronDown, ChevronUp, Boxes, QrCode, Keyboard, Camera, CameraOff
 } from 'lucide-react';
+import { Html5Qrcode } from 'html5-qrcode';
 import { getItensByChave, SaldoEstoque, SkuTp } from '../lib/supabase';
 
 interface CheckKDProps {
@@ -155,13 +156,17 @@ function ItemCard({ item, onMapear }: { item: ItemComStatus; onMapear: (sku: str
 
 // ── Componente principal ──────────────────────────────────────────
 export default function CheckKD({ onStartTimer }: CheckKDProps) {
-  const [mode, setMode] = useState<'qr' | 'manual'>('qr');
+  const [mode, setMode] = useState<'camera' | 'qr' | 'manual'>('qr');
   const [inputValue, setInputValue] = useState(() => sessionStorage.getItem('LAST_CHECKED_KD_KEY') || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [itens, setItens] = useState<ItemComStatus[] | null>(null);
   const [chaveAtual, setChaveAtual] = useState(() => sessionStorage.getItem('LAST_CHECKED_KD_KEY') || '');
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+
   const inputRef = useRef<HTMLInputElement>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
 
   const buscar = useCallback(async (raw: string) => {
     const chave = raw.replace(/\s+/g, '').toUpperCase().trim();
@@ -185,6 +190,68 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
       setLoading(false);
     }
   }, []);
+
+  // Controlar câmera com Html5Qrcode
+  useEffect(() => {
+    if (mode === 'camera') {
+      let isMounted = true;
+      setCameraError(null);
+
+      const startScanner = async () => {
+        try {
+          // Garante parada de scanner anterior se houver
+          if (scannerRef.current) {
+            try { await scannerRef.current.stop(); } catch {}
+          }
+
+          const html5Qrcode = new Html5Qrcode("qr-reader");
+          scannerRef.current = html5Qrcode;
+
+          await html5Qrcode.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            (decodedText) => {
+              if (isMounted) {
+                setInputValue(decodedText);
+                buscar(decodedText);
+                setCameraActive(false);
+                // Para a câmera após leitura bem sucedida
+                html5Qrcode.stop().catch(() => {});
+              }
+            },
+            () => {
+              // Ignore scan errors while searching frame
+            }
+          );
+          if (isMounted) setCameraActive(true);
+        } catch (err: any) {
+          if (isMounted) {
+            console.error("Erro na câmera:", err);
+            setCameraError(err?.message || "Não foi possível acessar a câmera. Verifique a permissão do navegador.");
+            setCameraActive(false);
+          }
+        }
+      };
+
+      startScanner();
+
+      return () => {
+        isMounted = false;
+        if (scannerRef.current) {
+          scannerRef.current.stop().catch(() => {}).finally(() => {
+            scannerRef.current = null;
+          });
+        }
+      };
+    } else {
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {}).finally(() => {
+          scannerRef.current = null;
+        });
+      }
+      setCameraActive(false);
+    }
+  }, [mode, buscar]);
 
   // Auto-foco e auto-recarregamento ao voltar para a aba
   useEffect(() => {
@@ -235,30 +302,68 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
           </div>
         </div>
 
-        {/* Toggle QR / Manual */}
-        <div className="flex bg-slate-100 rounded-xl p-1 gap-1 mb-4">
+        {/* Toggle 3 Modos: Câmera | Leitor USB | Digitar */}
+        <div className="flex bg-slate-100 rounded-xl p-1 gap-1 mb-4 overflow-x-auto">
           <button
-            onClick={() => setMode('qr')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all ${
-              mode === 'qr' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+            onClick={() => setMode('camera')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+              mode === 'camera' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <ScanLine size={14} /> Scanner / QR Code
+            <Camera size={14} /> Câmera ao Vivo
+          </button>
+          <button
+            onClick={() => setMode('qr')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+              mode === 'qr' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <ScanLine size={14} /> Leitor Bip / USB
           </button>
           <button
             onClick={() => setMode('manual')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all ${
-              mode === 'manual' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+              mode === 'manual' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'
             }`}
           >
             <Keyboard size={14} /> Digitar Chave
           </button>
         </div>
 
+        {/* Câmera Scanner interativo */}
+        {mode === 'camera' && (
+          <div className="mb-4 space-y-2">
+            <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-video flex items-center justify-center">
+              <div id="qr-reader" className="w-full h-full border-none [&_video]:object-cover" />
+              {!cameraActive && !cameraError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-950/80 gap-2">
+                  <Loader2 className="animate-spin text-blue-500" size={28} />
+                  <span className="text-xs font-medium">Iniciando câmera...</span>
+                </div>
+              )}
+              {cameraError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 bg-slate-950/90 p-4 text-center gap-2">
+                  <AlertCircle size={28} />
+                  <span className="text-xs font-bold">{cameraError}</span>
+                  <button
+                    onClick={() => setMode('qr')}
+                    className="mt-2 text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700"
+                  >
+                    Usar Leitor USB / Digitação
+                  </button>
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 text-center font-medium">
+              📷 Aponte a câmera do dispositivo para o QR Code da caixa
+            </p>
+          </div>
+        )}
+
         {/* Campo de entrada (funciona para scanner e digitação) */}
         <div className="relative">
           <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300">
-            {mode === 'qr' ? <ScanLine size={18} /> : <Search size={18} />}
+            {mode === 'camera' ? <Camera size={18} /> : mode === 'qr' ? <ScanLine size={18} /> : <Search size={18} />}
           </div>
           <input
             ref={inputRef}
@@ -267,7 +372,9 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
             onChange={e => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              mode === 'qr'
+              mode === 'camera'
+                ? 'Chave lida pela câmera aparecerá aqui...'
+                : mode === 'qr'
                 ? 'Aguardando leitura do scanner... (Enter para buscar)'
                 : 'Ex: HDAK80F09003/201800125449 (espaços são ignorados)'
             }
