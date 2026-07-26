@@ -14,6 +14,12 @@ import { db } from './firebase';
 
 export type UserRole = 'administrador' | 'usuario';
 
+export interface UserPermissions {
+  allowedTabs: ('dashboard' | 'timer' | 'reports' | 'check' | 'users')[];
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
 export interface AppUser {
   id: string;
   username: string;
@@ -21,6 +27,7 @@ export interface AppUser {
   displayName: string;
   cargo: string;
   role: UserRole;
+  permissions?: UserPermissions;
   createdAt: string;
 }
 
@@ -34,6 +41,11 @@ const DEFAULT_ADMIN = {
   displayName: 'Reldery Assunção',
   cargo: 'Engenheiro de Processos',
   role: 'administrador' as UserRole,
+  permissions: {
+    allowedTabs: ['dashboard', 'timer', 'reports', 'check', 'users'],
+    canEdit: true,
+    canDelete: true,
+  }
 };
 
 /** Inicializa o admin se a base estiver vazia */

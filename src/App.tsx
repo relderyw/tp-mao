@@ -186,21 +186,22 @@ function AppContent() {
   }
 
   const isAdmin = currentUser.role === 'administrador';
+  const userAllowedTabs = currentUser.permissions?.allowedTabs || (isAdmin ? ['dashboard', 'timer', 'reports', 'check', 'users'] : ['dashboard', 'timer', 'reports', 'check']);
 
   const startTimer = (processId: string) => {
     setSelectedProcessId(processId);
     setActiveTab('timer');
   };
 
-  const tabs = [
+  const allPossibleTabs = [
     { id: 'dashboard',   label: 'Dashboard',  icon: Activity },
     { id: 'timer',       label: 'Mapeamento', icon: Clock },
     { id: 'reports',     label: 'Relatório',  icon: FileText },
     { id: 'check',       label: 'Check KD',   icon: ScanLine },
-    ...(isAdmin ? [
-      { id: 'users', label: 'Usuários', icon: Users }
-    ] : []),
+    { id: 'users',       label: 'Usuários',   icon: Users },
   ] as { id: TabId; label: string; icon: React.ComponentType<any> }[];
+
+  const tabs = allPossibleTabs.filter(tab => isAdmin || userAllowedTabs.includes(tab.id as any));
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
@@ -313,7 +314,7 @@ function AppContent() {
               />
             )}
             {activeTab === 'reports' && (
-              <ItemsReport />
+              <ItemsReport currentUser={currentUser} />
             )}
             {activeTab === 'check' && (
               <CheckKD

@@ -322,7 +322,7 @@ export async function getSkusReport(
   let query = supabase
     .from('sku_tp')
     .select('*', { count: 'exact' })
-    .order('updated_at', { ascending: false, nullsFirst: false });
+    .order('sku', { ascending: true });
 
   if (search?.trim()) {
     const s = search.trim();

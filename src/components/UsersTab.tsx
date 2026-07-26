@@ -13,12 +13,25 @@ interface UsersTabProps {
 
 type ModalMode = 'create' | 'edit' | null;
 
+const ALL_TABS: { id: 'dashboard' | 'timer' | 'reports' | 'check' | 'users'; label: string }[] = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'timer',     label: 'Mapeamento' },
+  { id: 'reports',   label: 'Relatório' },
+  { id: 'check',     label: 'Check KD' },
+  { id: 'users',     label: 'Usuários' },
+];
+
 const EMPTY_FORM = {
   username: '',
   password: '',
   displayName: '',
   cargo: '',
   role: 'usuario' as UserRole,
+  permissions: {
+    allowedTabs: ['dashboard', 'timer', 'reports', 'check'] as ('dashboard' | 'timer' | 'reports' | 'check' | 'users')[],
+    canEdit: true,
+    canDelete: false,
+  }
 };
 
 export default function UsersTab({ currentUser }: UsersTabProps) {
@@ -66,6 +79,11 @@ export default function UsersTab({ currentUser }: UsersTabProps) {
       displayName: u.displayName,
       cargo: u.cargo,
       role: u.role,
+      permissions: u.permissions || {
+        allowedTabs: u.role === 'administrador' ? ['dashboard', 'timer', 'reports', 'check', 'users'] : ['dashboard', 'timer', 'reports', 'check'],
+        canEdit: u.role === 'administrador' ? true : true,
+        canDelete: u.role === 'administrador' ? true : false,
+      }
     });
     setError('');
     setShowPass(false);
@@ -331,12 +349,109 @@ export default function UsersTab({ currentUser }: UsersTabProps) {
                   <label>Nível de Acesso *</label>
                   <select
                     value={form.role}
-                    onChange={e => setForm(f => ({ ...f, role: e.target.value as UserRole }))}
+                    onChange={e => {
+                      const newRole = e.target.value as UserRole;
+                      setForm(f => ({
+                        ...f,
+                        role: newRole,
+                        permissions: {
+                          allowedTabs: newRole === 'administrador'
+                            ? ['dashboard', 'timer', 'reports', 'check', 'users']
+                            : f.permissions.allowedTabs,
+                          canEdit: newRole === 'administrador' ? true : f.permissions.canEdit,
+                          canDelete: newRole === 'administrador' ? true : f.permissions.canDelete,
+                        }
+                      }));
+                    }}
                     disabled={submitting || (editingUser?.username === 'reldery_assuncao')}
                   >
                     <option value="usuario">Usuário</option>
                     <option value="administrador">Administrador</option>
                   </select>
+                </div>
+              </div>
+
+              {/* ── Permissões de Acesso e Ações ── */}
+              <div className="mt-4 pt-4 border-t border-slate-200">
+                <h4 className="text-xs font-black uppercase text-slate-700 tracking-wider mb-2">Permissões de Telas e Ações</h4>
+                
+                <div className="mb-3">
+                  <label className="text-xs text-slate-500 font-semibold block mb-1.5">Telas Acessíveis:</label>
+                  <div className="flex flex-wrap gap-2">
+                    {ALL_TABS.map(tab => {
+                      const checked = form.permissions.allowedTabs.includes(tab.id);
+                      return (
+                        <label
+                          key={tab.id}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-all ${
+                            checked
+                              ? 'bg-blue-50 border-blue-300 text-blue-700'
+                              : 'bg-slate-50 border-slate-200 text-slate-400'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={submitting || form.role === 'administrador'}
+                            onChange={e => {
+                              const isChecked = e.target.checked;
+                              setForm(f => ({
+                                ...f,
+                                permissions: {
+                                  ...f.permissions,
+                                  allowedTabs: isChecked
+                                    ? [...f.permissions.allowedTabs, tab.id]
+                                    : f.permissions.allowedTabs.filter(t => t !== tab.id)
+                                }
+                              }));
+                            }}
+                            className="rounded text-blue-600 focus:ring-0"
+                          />
+                          {tab.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <label className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                    form.permissions.canEdit ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-400'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={form.permissions.canEdit}
+                      disabled={submitting || form.role === 'administrador'}
+                      onChange={e => {
+                        const checked = e.target.checked;
+                        setForm(f => ({
+                          ...f,
+                          permissions: { ...f.permissions, canEdit: checked }
+                        }));
+                      }}
+                      className="rounded text-emerald-600 focus:ring-0"
+                    />
+                    ✏️ Pode Editar Dados
+                  </label>
+
+                  <label className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                    form.permissions.canDelete ? 'bg-red-50 border-red-300 text-red-700' : 'bg-slate-50 border-slate-200 text-slate-400'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={form.permissions.canDelete}
+                      disabled={submitting || form.role === 'administrador'}
+                      onChange={e => {
+                        const checked = e.target.checked;
+                        setForm(f => ({
+                          ...f,
+                          permissions: { ...f.permissions, canDelete: checked }
+                        }));
+                      }}
+                      className="rounded text-red-600 focus:ring-0"
+                    />
+                    🗑️ Pode Excluir Dados
+                  </label>
                 </div>
               </div>
 
