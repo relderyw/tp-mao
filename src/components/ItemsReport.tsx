@@ -112,6 +112,18 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const fmtSec = (val?: number | null) => val != null && val > 0 ? `${val.toFixed(1)}s` : <span className="text-slate-700">—</span>;
 
+  const fmtDateMap = (val?: string | null) => {
+    if (!val) return '—';
+    try {
+      if (val.includes('/')) return val;
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return val;
+      return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return val;
+    }
+  };
+
   const exportCSV = () => {
     const headers = ["SKU","Descricao","Modelo","Status","Analista","Data Map","Tempo Total",...PROCESS_COLS.map(p => p.label)];
     const rows = items.map(i => [
@@ -137,12 +149,45 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
         const val = (editingItem as any)[k];
         if (typeof val === "number") totalTime += val;
       });
-      const payload: SkuTp = { ...editingItem, tempo_total: Number(totalTime.toFixed(2)), updated_at: new Date().toISOString() };
-      const { data, error } = await supabase.from("sku_tp").upsert(payload,{onConflict:"sku"}).select("*").single();
-      if (error) { alert("Erro ao salvar: " + error.message); }
-      else if (data) { setItems(prev => prev.map(item => item.sku === data.sku ? data : item)); setEditingItem(null); }
-    } catch (err: any) { alert("Erro: " + err.message); }
-    finally { setSavingEdit(false); }
+
+      let cleanDataMap = editingItem.data_map;
+      if (cleanDataMap && cleanDataMap.includes('/')) {
+        const parts = cleanDataMap.split(' ');
+        if (parts[0]) {
+          const [d, m, y] = parts[0].split('/');
+          if (d && m && y) {
+            cleanDataMap = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T${parts[1] || '00:00:00'}Z`;
+          }
+        }
+      }
+
+      const { id, created_at, ...updateFields } = editingItem as any;
+
+      const payload = {
+        ...updateFields,
+        data_map: cleanDataMap || null,
+        tempo_total: Number(totalTime.toFixed(2)),
+        updated_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from("sku_tp")
+        .update(payload)
+        .eq("sku", editingItem.sku)
+        .select("*")
+        .single();
+
+      if (error) {
+        alert("Erro ao salvar no banco: " + error.message);
+      } else if (data) {
+        setItems(prev => prev.map(item => item.sku === data.sku ? data : item));
+        setEditingItem(null);
+      }
+    } catch (err: any) {
+      alert("Erro: " + err.message);
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   const isAllTimesMapped = (item: SkuTp): boolean => {
@@ -292,7 +337,7 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
                           <td className="px-4 py-3"><span className="text-slate-400 text-xs font-semibold">{item.modelo||"—"}</span></td>
                           <td className="px-4 py-3 text-center"><span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black ${s.color} ${s.bg}`}>{s.icon}{s.label}</span></td>
                           <td className="px-4 py-3"><span className="text-slate-400 text-xs">{item.responsavel||"—"}</span></td>
-                          <td className="px-4 py-3"><span className="text-slate-500 text-xs font-mono">{item.data_map||"—"}</span></td>
+                          <td className="px-4 py-3"><span className="text-slate-500 text-xs font-mono">{fmtDateMap(item.data_map)}</span></td>
                           <td className="px-4 py-3 text-right"><span className={`font-mono font-black text-xs ${item.tempo_total ? "text-white" : "text-slate-700"}`}>{item.tempo_total ? `${item.tempo_total.toFixed(1)}s` : "—"}</span></td>
                           {PROCESS_COLS.map(p => <td key={p.key} className="px-3 py-3 text-right"><span className={`font-mono text-xs ${(item as any)[p.key] ? p.color : "text-slate-700"}`}>{fmtSec((item as any)[p.key])}</span></td>)}
                         </tr>

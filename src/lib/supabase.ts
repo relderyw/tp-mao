@@ -408,7 +408,7 @@ export async function saveSubProcessMeasurements(
     .single();
 
   const now = new Date();
-  const dataMapStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR');
+  const dataMapStr = now.toISOString();
 
   const currentTp = current || { sku, status: 'pendente' };
   const merged = {
