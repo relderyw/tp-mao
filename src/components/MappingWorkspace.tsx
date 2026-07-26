@@ -117,21 +117,35 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
   // Carregar SKUs e estatísticas
   useEffect(() => {
     loadData();
-  }, [searchTerm]);
+  }, [searchTerm, initialSku]);
 
   const loadData = async () => {
     setLoadingSkus(true);
     try {
-      const [list, st] = await Promise.all([
+      let [list, st] = await Promise.all([
         getSkusList(searchTerm, 100),
         getStatsTp()
       ]);
+
+      // Se tiver initialSku mas ele não veio nos primeiros 100 resultados, busca especificamente ele
+      if (initialSku && !list.some(s => s.sku.toUpperCase() === initialSku.toUpperCase())) {
+        const specific = await getSkusList(initialSku, 10);
+        if (specific.length > 0) {
+          list = [...specific, ...list];
+        }
+      }
+
       setSkus(list);
       setStats(st);
 
       if (initialSku && list.length > 0) {
-        const idx = list.findIndex(s => s.sku === initialSku);
-        if (idx !== -1) setSelectedSkuIndex(idx);
+        const idx = list.findIndex(s => s.sku.toUpperCase() === initialSku.toUpperCase());
+        if (idx !== -1) {
+          setSelectedSkuIndex(idx);
+          setTimeout(() => {
+            rightPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }, 150);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -394,7 +408,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-orange-500" />
-              RW T&amp;P
+              T&amp;P - MAO
             </h2>
             <div className="flex items-center gap-2 text-slate-400 text-xs font-semibold bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700/50">
               <User className="w-3.5 h-3.5 text-orange-400" />

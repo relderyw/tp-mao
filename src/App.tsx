@@ -219,12 +219,19 @@ function AppContent() {
               </div>
               <div className="hidden sm:flex flex-col leading-tight">
                 <span className="text-base font-black tracking-tight text-gray-900" style={{ letterSpacing: '-0.03em' }}>
-                  T&amp;P-MAO
+                  T&amp;P - MAO
                 </span>
                 <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: '#0066b2' }}>
                   LSL Transportes
                 </span>
               </div>
+            </div>
+
+            {/* Nome da Tela Ativa no Centro do Header */}
+            <div className="flex-1 flex justify-center items-center px-3">
+              <span className="text-sm sm:text-base font-black tracking-tight text-gray-800 uppercase font-mono px-3 py-1 rounded-full bg-slate-100 border border-slate-200/80">
+                {tabs.find(t => t.id === activeTab)?.label || 'T&P - MAO'}
+              </span>
             </div>
 
             {/* Desktop Nav */}
