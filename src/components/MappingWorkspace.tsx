@@ -369,8 +369,6 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
       [procConfig.t1Key]: null,
       [procConfig.t2Key]: null,
       [procConfig.t3Key]: null,
-      [procConfig.t4Key]: null,
-      [procConfig.t5Key]: null,
       [procConfig.resKey]: null
     };
 
@@ -665,13 +663,11 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
             {PROCESS_CONFIGS.map((proc) => {
               const isActive = activeProcessId === proc.id;
 
-              // Extrai as 5 tomadas do SKU para este sub-processo
+              // Extrai as 3 tomadas do SKU para este sub-processo
               const t1 = selectedSku?.[proc.t1Key as keyof SkuTp] as number | null;
               const t2 = selectedSku?.[proc.t2Key as keyof SkuTp] as number | null;
               const t3 = selectedSku?.[proc.t3Key as keyof SkuTp] as number | null;
-              const t4 = selectedSku?.[proc.t4Key as keyof SkuTp] as number | null;
-              const t5 = selectedSku?.[proc.t5Key as keyof SkuTp] as number | null;
-              const tomadas = [t1, t2, t3, t4, t5].filter(t => t != null && t > 0);
+              const tomadas = [t1, t2, t3].filter(t => t != null && t > 0);
               const totalTomadasCount = tomadas.length;
 
               return (
@@ -693,7 +689,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                     </span>
                     <div className="flex items-center gap-3">
                       <span className="text-xs font-mono font-bold text-slate-400 bg-slate-800/60 px-3 py-1 rounded-full border border-slate-700/50">
-                        {totalTomadasCount} de 5
+                        {totalTomadasCount} de 3
                       </span>
                     </div>
                   </button>
@@ -710,14 +706,12 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                           {formatSecondsDisplay(time)}
                         </div>
 
-                        {/* Pílulas das 5 tomadas já gravadas: 1T | 2T | 3T | 4T | 5T */}
+                        {/* Pílulas das 3 tomadas já gravadas: 1T | 2T | 3T */}
                         <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
                           {[
                             { label: '1T', val: t1 },
                             { label: '2T', val: t2 },
                             { label: '3T', val: t3 },
-                            { label: '4T', val: t4 },
-                            { label: '5T', val: t5 }
                           ].map((pill, idx) => (
                             <div
                               key={idx}
