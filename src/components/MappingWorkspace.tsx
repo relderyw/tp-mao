@@ -283,11 +283,12 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     const t5 = selectedSku[procConfig.t5Key as keyof SkuTp] as number | null;
 
     let targetKey: string = procConfig.t1Key;
-    if (t1 != null && t2 == null) targetKey = procConfig.t2Key;
-    else if (t1 != null && t2 != null && t3 == null) targetKey = procConfig.t3Key;
-    else if (t1 != null && t2 != null && t3 != null && t4 == null) targetKey = procConfig.t4Key;
-    else if (t1 != null && t2 != null && t3 != null && t4 != null && t5 == null) targetKey = procConfig.t5Key;
-    else targetKey = procConfig.t5Key; // Sobrescreve a 5ª se todas preenchidas
+    if (t1 == null || t1 === 0) targetKey = procConfig.t1Key;
+    else if (t2 == null || t2 === 0) targetKey = procConfig.t2Key;
+    else if (t3 == null || t3 === 0) targetKey = procConfig.t3Key;
+    else if (t4 == null || t4 === 0) targetKey = procConfig.t4Key;
+    else if (t5 == null || t5 === 0) targetKey = procConfig.t5Key;
+    else targetKey = procConfig.t5Key; // Sobrescreve a 5ª se todas as 5 estiverem preenchidas
 
     const currentT1 = (targetKey === procConfig.t1Key ? tVal : t1) || 0;
     const currentT2 = (targetKey === procConfig.t2Key ? tVal : t2) || 0;
