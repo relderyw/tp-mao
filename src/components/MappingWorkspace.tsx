@@ -15,7 +15,7 @@ interface MappingWorkspaceProps {
   onClose?: () => void;
 }
 
-// Configuração dos 6 sub-processos na ordem exata solicitada com 5 tomadas cada (t1 a t5)
+// Configuração dos 6 sub-processos — 3 tomadas cada (t1 a t3, conforme colunas existentes no banco)
 const PROCESS_CONFIGS = [
   {
     id: 'pegar_ik',
@@ -24,7 +24,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-cyan-500/10',
     textColor: 'text-cyan-400',
     btnColor: 'bg-cyan-500 hover:bg-cyan-600',
-    t1Key: 'pegar_ik_t1', t2Key: 'pegar_ik_t2', t3Key: 'pegar_ik_t3', t4Key: 'pegar_ik_t4', t5Key: 'pegar_ik_t5', resKey: 'pegar_ik_res'
+    t1Key: 'pegar_ik_t1', t2Key: 'pegar_ik_t2', t3Key: 'pegar_ik_t3', resKey: 'pegar_ik_res'
   },
   {
     id: 'abrir',
@@ -33,7 +33,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-orange-500/10',
     textColor: 'text-orange-400',
     btnColor: 'bg-orange-500 hover:bg-orange-600',
-    t1Key: 'abrir_t1', t2Key: 'abrir_t2', t3Key: 'abrir_t3', t4Key: 'abrir_t4', t5Key: 'abrir_t5', resKey: 'abrir_res'
+    t1Key: 'abrir_t1', t2Key: 'abrir_t2', t3Key: 'abrir_t3', resKey: 'abrir_res'
   },
   {
     id: 'form',
@@ -42,7 +42,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-emerald-500/10',
     textColor: 'text-emerald-400',
     btnColor: 'bg-emerald-500 hover:bg-emerald-600',
-    t1Key: 'form_t1', t2Key: 'form_t2', t3Key: 'form_t3', t4Key: 'form_t4', t5Key: 'form_t5', resKey: 'form_res'
+    t1Key: 'form_t1', t2Key: 'form_t2', t3Key: 'form_t3', resKey: 'form_res'
   },
   {
     id: 'desc',
@@ -51,7 +51,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-purple-500/10',
     textColor: 'text-purple-400',
     btnColor: 'bg-purple-500 hover:bg-purple-600',
-    t1Key: 'desc_t1', t2Key: 'desc_t2', t3Key: 'desc_t3', t4Key: 'desc_t4', t5Key: 'desc_t5', resKey: 'desc_res'
+    t1Key: 'desc_t1', t2Key: 'desc_t2', t3Key: 'desc_t3', resKey: 'desc_res'
   },
   {
     id: 'etq',
@@ -60,7 +60,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-blue-500/10',
     textColor: 'text-blue-400',
     btnColor: 'bg-blue-500 hover:bg-blue-600',
-    t1Key: 'etq_t1', t2Key: 'etq_t2', t3Key: 'etq_t3', t4Key: 'etq_t4', t5Key: 'etq_t5', resKey: 'etq_res'
+    t1Key: 'etq_t1', t2Key: 'etq_t2', t3Key: 'etq_t3', resKey: 'etq_res'
   },
   {
     id: 'pos',
@@ -69,7 +69,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-amber-500/10',
     textColor: 'text-amber-400',
     btnColor: 'bg-amber-500 hover:bg-amber-600',
-    t1Key: 'pos_t1', t2Key: 'pos_t2', t3Key: 'pos_t3', t4Key: 'pos_t4', t5Key: 'pos_t5', resKey: 'pos_res'
+    t1Key: 'pos_t1', t2Key: 'pos_t2', t3Key: 'pos_t3', resKey: 'pos_res'
   }
 ] as const;
 
@@ -265,27 +265,21 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
 
     const tVal = Number(timeToRecord.toFixed(2));
 
-    // Identifica qual tomada (t1 a t5) está vaga
+    // Identifica qual tomada (t1 a t3) está vaga
     const t1 = selectedSku[procConfig.t1Key as keyof SkuTp] as number | null;
     const t2 = selectedSku[procConfig.t2Key as keyof SkuTp] as number | null;
     const t3 = selectedSku[procConfig.t3Key as keyof SkuTp] as number | null;
-    const t4 = selectedSku[procConfig.t4Key as keyof SkuTp] as number | null;
-    const t5 = selectedSku[procConfig.t5Key as keyof SkuTp] as number | null;
 
     let targetKey: string = procConfig.t1Key;
     if (t1 != null && t2 == null) targetKey = procConfig.t2Key;
     else if (t1 != null && t2 != null && t3 == null) targetKey = procConfig.t3Key;
-    else if (t1 != null && t2 != null && t3 != null && t4 == null) targetKey = procConfig.t4Key;
-    else if (t1 != null && t2 != null && t3 != null && t4 != null && t5 == null) targetKey = procConfig.t5Key;
-    else targetKey = procConfig.t5Key; // Sobrescreve a 5ª se todas preenchidas
+    else targetKey = procConfig.t3Key; // Sobrescreve a 3ª se todas preenchidas
 
     const currentT1 = (targetKey === procConfig.t1Key ? tVal : t1) || 0;
     const currentT2 = (targetKey === procConfig.t2Key ? tVal : t2) || 0;
     const currentT3 = (targetKey === procConfig.t3Key ? tVal : t3) || 0;
-    const currentT4 = (targetKey === procConfig.t4Key ? tVal : t4) || 0;
-    const currentT5 = (targetKey === procConfig.t5Key ? tVal : t5) || 0;
 
-    const validTs = [currentT1, currentT2, currentT3, currentT4, currentT5].filter(v => v > 0);
+    const validTs = [currentT1, currentT2, currentT3].filter(v => v > 0);
     const avg = validTs.length > 0 ? Number((validTs.reduce((a, b) => a + b, 0) / validTs.length).toFixed(2)) : 0;
 
     const fieldsToSave: Partial<SkuTp> = {
@@ -301,16 +295,14 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
       setSkus(newSkus);
       setStats(await getStatsTp());
 
-      // Verifica se completou as 5 tomadas desse sub-processo -> avança pro próximo sub-processo!
+      // Verifica se completou as 3 tomadas desse sub-processo -> avança pro próximo sub-processo!
       const countRecorded = [
         updated[procConfig.t1Key as keyof SkuTp],
         updated[procConfig.t2Key as keyof SkuTp],
         updated[procConfig.t3Key as keyof SkuTp],
-        updated[procConfig.t4Key as keyof SkuTp],
-        updated[procConfig.t5Key as keyof SkuTp]
       ].filter(v => v != null && (v as number) > 0).length;
 
-      if (countRecorded >= 5) {
+      if (countRecorded >= 3) {
         // Avança automaticamente para o próximo sub-processo na lista
         const currIdx = PROCESS_CONFIGS.findIndex(p => p.id === procConfig.id);
         if (currIdx !== -1 && currIdx < PROCESS_CONFIGS.length - 1) {
