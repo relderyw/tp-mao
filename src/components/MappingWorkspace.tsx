@@ -15,7 +15,7 @@ interface MappingWorkspaceProps {
   onClose?: () => void;
 }
 
-// Configuração dos 6 sub-processos — 3 tomadas cada (t1 a t3) + qtd + res (média)
+// Configuração dos 6 sub-processos — 5 tomadas cada (t1 a t5) + qtd + res (média)
 const PROCESS_CONFIGS = [
   {
     id: 'pegar_ik',
@@ -24,7 +24,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-cyan-500/10',
     textColor: 'text-cyan-400',
     btnColor: 'bg-cyan-500 hover:bg-cyan-600',
-    t1Key: 'pegar_ik_t1', t2Key: 'pegar_ik_t2', t3Key: 'pegar_ik_t3', qtdKey: 'pegar_ik_qtd', resKey: 'pegar_ik_res'
+    t1Key: 'pegar_ik_t1', t2Key: 'pegar_ik_t2', t3Key: 'pegar_ik_t3', t4Key: 'pegar_ik_t4', t5Key: 'pegar_ik_t5', qtdKey: 'pegar_ik_qtd', resKey: 'pegar_ik_res'
   },
   {
     id: 'abrir',
@@ -33,7 +33,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-orange-500/10',
     textColor: 'text-orange-400',
     btnColor: 'bg-orange-500 hover:bg-orange-600',
-    t1Key: 'abrir_t1', t2Key: 'abrir_t2', t3Key: 'abrir_t3', qtdKey: 'abrir_qtd', resKey: 'abrir_res'
+    t1Key: 'abrir_t1', t2Key: 'abrir_t2', t3Key: 'abrir_t3', t4Key: 'abrir_t4', t5Key: 'abrir_t5', qtdKey: 'abrir_qtd', resKey: 'abrir_res'
   },
   {
     id: 'form',
@@ -42,7 +42,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-emerald-500/10',
     textColor: 'text-emerald-400',
     btnColor: 'bg-emerald-500 hover:bg-emerald-600',
-    t1Key: 'form_t1', t2Key: 'form_t2', t3Key: 'form_t3', qtdKey: 'form_qtd', resKey: 'form_res'
+    t1Key: 'form_t1', t2Key: 'form_t2', t3Key: 'form_t3', t4Key: 'form_t4', t5Key: 'form_t5', qtdKey: 'form_qtd', resKey: 'form_res'
   },
   {
     id: 'desc',
@@ -51,7 +51,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-purple-500/10',
     textColor: 'text-purple-400',
     btnColor: 'bg-purple-500 hover:bg-purple-600',
-    t1Key: 'desc_t1', t2Key: 'desc_t2', t3Key: 'desc_t3', qtdKey: 'desc_qtd', resKey: 'desc_res'
+    t1Key: 'desc_t1', t2Key: 'desc_t2', t3Key: 'desc_t3', t4Key: 'desc_t4', t5Key: 'desc_t5', qtdKey: 'desc_qtd', resKey: 'desc_res'
   },
   {
     id: 'etq',
@@ -60,7 +60,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-blue-500/10',
     textColor: 'text-blue-400',
     btnColor: 'bg-blue-500 hover:bg-blue-600',
-    t1Key: 'etq_t1', t2Key: 'etq_t2', t3Key: 'etq_t3', qtdKey: 'etq_qtd', resKey: 'etq_res'
+    t1Key: 'etq_t1', t2Key: 'etq_t2', t3Key: 'etq_t3', t4Key: 'etq_t4', t5Key: 'etq_t5', qtdKey: 'etq_qtd', resKey: 'etq_res'
   },
   {
     id: 'pos',
@@ -69,7 +69,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-amber-500/10',
     textColor: 'text-amber-400',
     btnColor: 'bg-amber-500 hover:bg-amber-600',
-    t1Key: 'pos_t1', t2Key: 'pos_t2', t3Key: 'pos_t3', qtdKey: 'pos_qtd', resKey: 'pos_res'
+    t1Key: 'pos_t1', t2Key: 'pos_t2', t3Key: 'pos_t3', t4Key: 'pos_t4', t5Key: 'pos_t5', qtdKey: 'pos_qtd', resKey: 'pos_res'
   }
 ] as const;
 
@@ -275,21 +275,27 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
 
     const tVal = Number(timeToRecord.toFixed(2));
 
-    // Identifica qual tomada (t1 a t3) está vaga
+    // Identifica qual tomada (t1 a t5) está vaga
     const t1 = selectedSku[procConfig.t1Key as keyof SkuTp] as number | null;
     const t2 = selectedSku[procConfig.t2Key as keyof SkuTp] as number | null;
     const t3 = selectedSku[procConfig.t3Key as keyof SkuTp] as number | null;
+    const t4 = selectedSku[procConfig.t4Key as keyof SkuTp] as number | null;
+    const t5 = selectedSku[procConfig.t5Key as keyof SkuTp] as number | null;
 
     let targetKey: string = procConfig.t1Key;
     if (t1 != null && t2 == null) targetKey = procConfig.t2Key;
     else if (t1 != null && t2 != null && t3 == null) targetKey = procConfig.t3Key;
-    else targetKey = procConfig.t3Key; // Sobrescreve a 3ª se todas preenchidas
+    else if (t1 != null && t2 != null && t3 != null && t4 == null) targetKey = procConfig.t4Key;
+    else if (t1 != null && t2 != null && t3 != null && t4 != null && t5 == null) targetKey = procConfig.t5Key;
+    else targetKey = procConfig.t5Key; // Sobrescreve a 5ª se todas preenchidas
 
     const currentT1 = (targetKey === procConfig.t1Key ? tVal : t1) || 0;
     const currentT2 = (targetKey === procConfig.t2Key ? tVal : t2) || 0;
     const currentT3 = (targetKey === procConfig.t3Key ? tVal : t3) || 0;
+    const currentT4 = (targetKey === procConfig.t4Key ? tVal : t4) || 0;
+    const currentT5 = (targetKey === procConfig.t5Key ? tVal : t5) || 0;
 
-    const validTs = [currentT1, currentT2, currentT3].filter(v => v > 0);
+    const validTs = [currentT1, currentT2, currentT3, currentT4, currentT5].filter(v => v > 0);
     const avg = validTs.length > 0 ? Number((validTs.reduce((a, b) => a + b, 0) / validTs.length).toFixed(2)) : 0;
 
     // Inclui a QTD do processo
@@ -308,14 +314,16 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
       setSkus(newSkus);
       setStats(await getStatsTp());
 
-      // Verifica se completou as 3 tomadas desse sub-processo -> avança pro próximo sub-processo!
+      // Verifica se completou as 5 tomadas desse sub-processo -> avança pro próximo sub-processo!
       const countRecorded = [
         updated[procConfig.t1Key as keyof SkuTp],
         updated[procConfig.t2Key as keyof SkuTp],
         updated[procConfig.t3Key as keyof SkuTp],
+        updated[procConfig.t4Key as keyof SkuTp],
+        updated[procConfig.t5Key as keyof SkuTp],
       ].filter(v => v != null && (v as number) > 0).length;
 
-      if (countRecorded >= 3) {
+      if (countRecorded >= 5) {
         // Avança automaticamente para o próximo sub-processo na lista
         const currIdx = PROCESS_CONFIGS.findIndex(p => p.id === procConfig.id);
         if (currIdx !== -1 && currIdx < PROCESS_CONFIGS.length - 1) {
@@ -382,6 +390,8 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
       [procConfig.t1Key]: null,
       [procConfig.t2Key]: null,
       [procConfig.t3Key]: null,
+      [procConfig.t4Key]: null,
+      [procConfig.t5Key]: null,
       [procConfig.resKey]: null
     };
 
@@ -676,11 +686,13 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
             {PROCESS_CONFIGS.map((proc) => {
               const isActive = activeProcessId === proc.id;
 
-              // Extrai as 3 tomadas do SKU para este sub-processo
+              // Extrai as 5 tomadas do SKU para este sub-processo
               const t1 = selectedSku?.[proc.t1Key as keyof SkuTp] as number | null;
               const t2 = selectedSku?.[proc.t2Key as keyof SkuTp] as number | null;
               const t3 = selectedSku?.[proc.t3Key as keyof SkuTp] as number | null;
-              const tomadas = [t1, t2, t3].filter(t => t != null && t > 0);
+              const t4 = selectedSku?.[proc.t4Key as keyof SkuTp] as number | null;
+              const t5 = selectedSku?.[proc.t5Key as keyof SkuTp] as number | null;
+              const tomadas = [t1, t2, t3, t4, t5].filter(t => t != null && t > 0);
               const totalTomadasCount = tomadas.length;
 
               return (
@@ -702,7 +714,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                     </span>
                     <div className="flex items-center gap-3">
                       <span className="text-xs font-mono font-bold text-slate-400 bg-slate-800/60 px-3 py-1 rounded-full border border-slate-700/50">
-                        {totalTomadasCount} de 3
+                        {totalTomadasCount} de 5
                       </span>
                     </div>
                   </button>
@@ -719,12 +731,14 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                           {formatSecondsDisplay(time)}
                         </div>
 
-                        {/* Pílulas das 3 tomadas já gravadas: 1T | 2T | 3T */}
+                        {/* Pílulas das 5 tomadas já gravadas: 1T | 2T | 3T | 4T | 5T */}
                         <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
                           {[
                             { label: '1T', val: t1 },
                             { label: '2T', val: t2 },
                             { label: '3T', val: t3 },
+                            { label: '4T', val: t4 },
+                            { label: '5T', val: t5 }
                           ].map((pill, idx) => (
                             <div
                               key={idx}
