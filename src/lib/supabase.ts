@@ -22,7 +22,20 @@ export interface SaldoEstoque {
   qtde_kd: number;
   modelo: string;
   mod_comp: string;
-  mod_caixa: string;
+}
+
+export interface LocacaoItem extends SaldoEstoque {
+  tp: SkuTp | null;
+  statusCategoria: 'mapeado' | 'pendente' | 'nao_na_estrutura';
+}
+
+export interface LocacaoResumo {
+  locacao: string;
+  totalItens: number;
+  mapeados: number;
+  pendentes: number;
+  naoNaEstrutura: number;
+  itens: LocacaoItem[];
 }
 
 export interface SkuTp {
@@ -143,6 +156,96 @@ export async function getItensByChave(rawChave: string): Promise<(SaldoEstoque &
     ...s,
     tp: tpMap.get(s.sku) || null
   }));
+}
+
+/** Busca resumo por locação (saldo_estoque x sku_tp pendentes de mapeamento) */
+export async function getResumoLocacoes(filterLocacao?: string): Promise<LocacaoResumo[]> {
+  let allSaldo: SaldoEstoque[] = [];
+  let page = 0;
+  const pageSize = 1000;
+  let hasMore = true;
+
+  while (hasMore && page < 50) {
+    let query = supabase
+      .from('saldo_estoque')
+      .select('*')
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (filterLocacao && filterLocacao.trim()) {
+      query = query.ilike('locacao', `%${filterLocacao.trim()}%`);
+    }
+
+    const { data, error } = await query;
+    if (error || !data || data.length === 0) {
+      hasMore = false;
+    } else {
+      allSaldo = allSaldo.concat(data);
+      if (data.length < pageSize) {
+        hasMore = false;
+      } else {
+        page++;
+      }
+    }
+  }
+
+  if (allSaldo.length === 0) return [];
+
+  // Obter todos os SKUs únicos para consultar na tabela sku_tp
+  const skus = [...new Set(allSaldo.map(s => s.sku).filter(Boolean))];
+  
+  const tpMap = new Map<string, SkuTp>();
+  for (let i = 0; i < skus.length; i += 1000) {
+    const chunk = skus.slice(i, i + 1000);
+    const { data: tpData } = await supabase
+      .from('sku_tp')
+      .select('*')
+      .in('sku', chunk);
+
+    if (tpData) {
+      tpData.forEach(t => tpMap.set(t.sku, t));
+    }
+  }
+
+  // Agrupar por locação (sem repetir a locação)
+  const locMap = new Map<string, LocacaoResumo>();
+
+  allSaldo.forEach(item => {
+    const loc = (item.locacao || 'SEM LOCAÇÃO').trim().toUpperCase();
+    if (!locMap.has(loc)) {
+      locMap.set(loc, {
+        locacao: loc,
+        totalItens: 0,
+        mapeados: 0,
+        pendentes: 0,
+        naoNaEstrutura: 0,
+        itens: []
+      });
+    }
+
+    const locResumo = locMap.get(loc)!;
+    const tp = tpMap.get(item.sku) || null;
+
+    let statusCategoria: 'mapeado' | 'pendente' | 'nao_na_estrutura';
+    if (!tp) {
+      statusCategoria = 'nao_na_estrutura';
+      locResumo.naoNaEstrutura += 1;
+    } else if (tp.status === 'mapeado') {
+      statusCategoria = 'mapeado';
+      locResumo.mapeados += 1;
+    } else {
+      statusCategoria = 'pendente';
+      locResumo.pendentes += 1;
+    }
+
+    locResumo.totalItens += 1;
+    locResumo.itens.push({
+      ...item,
+      tp,
+      statusCategoria
+    });
+  });
+
+  return Array.from(locMap.values()).sort((a, b) => a.locacao.localeCompare(b.locacao));
 }
 
 /** Busca estatísticas globais de progresso */

@@ -3,10 +3,14 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   ScanLine, Search, CheckCircle2, Clock, Play,
   X, AlertCircle, Loader2, Package, RefreshCw,
-  ChevronDown, ChevronUp, Boxes, QrCode, Keyboard, Camera, CameraOff
+  ChevronDown, ChevronUp, Boxes, QrCode, Keyboard, Camera,
+  MapPin, Filter, Layers, Building2
 } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
-import { getItensByChave, SaldoEstoque, SkuTp } from '../lib/supabase';
+import {
+  getItensByChave, getResumoLocacoes, SaldoEstoque, SkuTp,
+  LocacaoResumo, LocacaoItem
+} from '../lib/supabase';
 
 interface CheckKDProps {
   onStartTimer: (skuLabel: string) => void;
@@ -29,8 +33,8 @@ function fmt(s?: number | null) {
   return s.toFixed(2) + 's';
 }
 
-// ── Card de item ──────────────────────────────────────────────────
-function ItemCard({ item, onMapear }: { item: ItemComStatus; onMapear: (sku: string) => void; key?: string }) {
+// ── Card de item individual (usado na aba Check por KD) ────────────────
+function ItemCard({ item, onMapear }: { item: ItemComStatus; onMapear: (sku: string) => void; key?: React.Key }) {
   const [expanded, setExpanded] = useState(false);
   const mapeado = item.tp?.status === 'mapeado';
 
@@ -64,7 +68,7 @@ function ItemCard({ item, onMapear }: { item: ItemComStatus; onMapear: (sku: str
               {item.modelo || '—'}
             </span>
             {item.locacao && (
-              <span className="text-[10px] font-bold text-slate-300 bg-slate-100 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
                 {item.locacao}
               </span>
             )}
@@ -154,8 +158,432 @@ function ItemCard({ item, onMapear }: { item: ItemComStatus; onMapear: (sku: str
   );
 }
 
-// ── Componente principal ──────────────────────────────────────────
+// ── Componente Card de Locação (para a aba de resumo por locação) ─────
+function LocacaoCard({
+  resumo,
+  expanded,
+  onToggleExpand,
+  onMapear
+}: {
+  resumo: LocacaoResumo;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onMapear: (sku: string) => void;
+  key?: React.Key;
+}) {
+  const percentMapeado = resumo.totalItens > 0
+    ? Math.round((resumo.mapeados / resumo.totalItens) * 100)
+    : 0;
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden transition-all hover:border-slate-300"
+    >
+      {/* Cards Header */}
+      <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 font-bold shrink-0">
+            <MapPin size={20} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-black text-slate-800 text-base font-mono tracking-tight">
+                {resumo.locacao}
+              </h3>
+              <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                {resumo.totalItens} {resumo.totalItens === 1 ? 'item' : 'itens'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Progresso de mapeamento: <strong className="text-slate-700 font-mono">{percentMapeado}%</strong>
+            </p>
+          </div>
+        </div>
+
+        {/* Badges de Contagem */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Mapeados */}
+          <div className="flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200/60 px-2.5 py-1 rounded-xl text-xs font-black">
+            <CheckCircle2 size={13} className="text-emerald-500" />
+            <span>{resumo.mapeados} Mapeados</span>
+          </div>
+
+          {/* Pendentes */}
+          {resumo.pendentes > 0 && (
+            <div className="flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200/60 px-2.5 py-1 rounded-xl text-xs font-black">
+              <Clock size={13} className="text-amber-500" />
+              <span>{resumo.pendentes} Pendentes</span>
+            </div>
+          )}
+
+          {/* Fora da Estrutura */}
+          {resumo.naoNaEstrutura > 0 && (
+            <div className="flex items-center gap-1 bg-rose-50 text-rose-700 border border-rose-200/60 px-2.5 py-1 rounded-xl text-xs font-black">
+              <AlertCircle size={13} className="text-rose-500" />
+              <span>{resumo.naoNaEstrutura} Fora da Estrutura</span>
+            </div>
+          )}
+
+          <button
+            onClick={onToggleExpand}
+            className="ml-auto sm:ml-2 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+          >
+            {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </button>
+        </div>
+      </div>
+
+      {/* Barra de Progresso Tricolor da Locação */}
+      <div className="w-full bg-slate-100 h-1.5 flex overflow-hidden">
+        <div
+          className="bg-emerald-500 transition-all duration-500"
+          style={{ width: `${resumo.totalItens > 0 ? (resumo.mapeados / resumo.totalItens) * 100 : 0}%` }}
+          title={`${resumo.mapeados} mapeados`}
+        />
+        <div
+          className="bg-amber-400 transition-all duration-500"
+          style={{ width: `${resumo.totalItens > 0 ? (resumo.pendentes / resumo.totalItens) * 100 : 0}%` }}
+          title={`${resumo.pendentes} pendentes`}
+        />
+        <div
+          className="bg-rose-400 transition-all duration-500"
+          style={{ width: `${resumo.totalItens > 0 ? (resumo.naoNaEstrutura / resumo.totalItens) * 100 : 0}%` }}
+          title={`${resumo.naoNaEstrutura} fora da estrutura`}
+        />
+      </div>
+
+      {/* Lista Expandida de Itens */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden bg-slate-50/60 border-t border-slate-100 p-4 space-y-2.5"
+          >
+            <div className="flex items-center justify-between px-1 mb-1">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Itens na Locação ({resumo.itens.length})
+              </span>
+            </div>
+
+            {resumo.itens.map((item, idx) => {
+              const isMapeado = item.statusCategoria === 'mapeado';
+              const isPendente = item.statusCategoria === 'pendente';
+              const isNaoEstrutura = item.statusCategoria === 'nao_na_estrutura';
+
+              return (
+                <div
+                  key={`${item.sku}-${idx}`}
+                  className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                    isMapeado
+                      ? 'bg-emerald-50/40 border-emerald-200/60'
+                      : isPendente
+                      ? 'bg-amber-50/40 border-amber-200/60'
+                      : 'bg-rose-50/40 border-rose-200/60'
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="font-mono font-black text-slate-800 text-sm">{item.sku}</span>
+                      {item.modelo && (
+                        <span className="text-[10px] font-bold bg-white text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded">
+                          {item.modelo}
+                        </span>
+                      )}
+                      {item.chave && (
+                        <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-1 py-0.5 rounded truncate max-w-[140px]">
+                          KD: {item.chave}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 truncate">{item.descricao}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">
+                      Qtde Saldo: <strong className="text-slate-600">{item.qtde}</strong>
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 justify-between sm:justify-end shrink-0">
+                    {isMapeado && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-lg">
+                        <CheckCircle2 size={11} /> MAPEADO
+                      </span>
+                    )}
+
+                    {isPendente && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-black text-amber-700 bg-amber-100 px-2.5 py-1 rounded-lg">
+                        <Clock size={11} /> PENDENTE
+                      </span>
+                    )}
+
+                    {isNaoEstrutura && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-black text-rose-700 bg-rose-100 px-2.5 py-1 rounded-lg">
+                        <AlertCircle size={11} /> FORA DA ESTRUTURA
+                      </span>
+                    )}
+
+                    {!isMapeado && (
+                      <button
+                        onClick={() => onMapear(item.sku)}
+                        className="flex items-center gap-1 text-xs font-black text-white bg-blue-600 hover:bg-blue-700 active:scale-95 px-3 py-1.5 rounded-xl transition-all shadow-sm shadow-blue-200"
+                      >
+                        <Play size={11} className="fill-current" /> MAPEAR
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+// ── Vista da Aba Resumo por Locação ──────────────────────────────────
+function ResumoLocacoesView({ onStartTimer }: CheckKDProps) {
+  const [locacoes, setLocacoes] = useState<LocacaoResumo[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'todos' | 'pendentes' | 'fora' | 'mapeados'>('todos');
+  const [expandedLocs, setExpandedLocs] = useState<Set<string>>(new Set());
+
+  const carregarLocacoes = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const dados = await getResumoLocacoes();
+      setLocacoes(dados);
+    } catch (err: any) {
+      console.error("Erro ao carregar locações:", err);
+      setError("Erro ao carregar resumo de locações: " + (err.message || 'Falha na conexão'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    carregarLocacoes();
+  }, [carregarLocacoes]);
+
+  const toggleExpand = (loc: string) => {
+    setExpandedLocs(prev => {
+      const next = new Set(prev);
+      if (next.has(loc)) next.delete(loc);
+      else next.add(loc);
+      return next;
+    });
+  };
+
+  // Filtragem local
+  const locacoesFiltradas = (locacoes || []).filter(l => {
+    const matchesSearch = l.locacao.toLowerCase().includes(searchTerm.toLowerCase().trim());
+    if (!matchesSearch) return false;
+
+    if (statusFilter === 'pendentes') return l.pendentes > 0;
+    if (statusFilter === 'fora') return l.naoNaEstrutura > 0;
+    if (statusFilter === 'mapeados') return l.mapeados === l.totalItens && l.totalItens > 0;
+
+    return true;
+  });
+
+  // Totais Globais
+  const totalLocacoesCount = locacoes?.length || 0;
+  const totalItensCount = locacoes?.reduce((acc, l) => acc + l.totalItens, 0) || 0;
+  const totalMapeadosCount = locacoes?.reduce((acc, l) => acc + l.mapeados, 0) || 0;
+  const totalPendentesCount = locacoes?.reduce((acc, l) => acc + l.pendentes, 0) || 0;
+  const totalNaoEstruturaCount = locacoes?.reduce((acc, l) => acc + l.naoNaEstrutura, 0) || 0;
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── KPIs Totais ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <Building2 size={16} className="text-slate-400" />
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Locações</span>
+          </div>
+          <span className="text-2xl font-black text-slate-800 font-mono">{totalLocacoesCount}</span>
+          <p className="text-[11px] text-slate-400 mt-0.5">{totalItensCount} itens totais</p>
+        </div>
+
+        <div className="bg-emerald-50/60 border border-emerald-100 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <CheckCircle2 size={16} className="text-emerald-500" />
+            <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Mapeados</span>
+          </div>
+          <span className="text-2xl font-black text-emerald-700 font-mono">{totalMapeadosCount}</span>
+          <p className="text-[11px] text-emerald-600/80 mt-0.5">Na estrutura T&P</p>
+        </div>
+
+        <div className="bg-amber-50/60 border border-amber-100 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <Clock size={16} className="text-amber-500" />
+            <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Pendentes</span>
+          </div>
+          <span className="text-2xl font-black text-amber-700 font-mono">{totalPendentesCount}</span>
+          <p className="text-[11px] text-amber-600/80 mt-0.5">Aguardando medição</p>
+        </div>
+
+        <div className="bg-rose-50/60 border border-rose-100 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <AlertCircle size={16} className="text-rose-500" />
+            <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest">Fora Estrutura</span>
+          </div>
+          <span className="text-2xl font-black text-rose-700 font-mono">{totalNaoEstruturaCount}</span>
+          <p className="text-[11px] text-rose-600/80 mt-0.5">Sem cadastro T&P</p>
+        </div>
+      </div>
+
+      {/* ── Barra de Busca e Filtros de Locação ── */}
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-4 sm:p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          {/* Campo de Filtro por Locação */}
+          <div className="relative flex-1">
+            <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              placeholder="Filtrar por locação (ex: FARA1000, FARA1102)..."
+              className="w-full pl-10 pr-9 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:border-transparent transition-all"
+              style={{ '--tw-ring-color': '#0066b2' } as any}
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-600"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={carregarLocacoes}
+            disabled={loading}
+            className="flex items-center justify-center gap-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 px-3.5 py-2.5 rounded-xl transition-all shrink-0"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <span>Atualizar</span>
+          </button>
+        </div>
+
+        {/* Botões de Filtro Rápido */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-1 shrink-0">Status:</span>
+          
+          <button
+            onClick={() => setStatusFilter('todos')}
+            className={`px-3 py-1 rounded-xl text-xs font-black transition-all shrink-0 ${
+              statusFilter === 'todos'
+                ? 'bg-slate-800 text-white shadow-sm'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            Todas ({totalLocacoesCount})
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('pendentes')}
+            className={`px-3 py-1 rounded-xl text-xs font-black transition-all shrink-0 ${
+              statusFilter === 'pendentes'
+                ? 'bg-amber-500 text-white shadow-sm'
+                : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+            }`}
+          >
+            Com Pendências
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('fora')}
+            className={`px-3 py-1 rounded-xl text-xs font-black transition-all shrink-0 ${
+              statusFilter === 'fora'
+                ? 'bg-rose-500 text-white shadow-sm'
+                : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+            }`}
+          >
+            Com Fora da Estrutura
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('mapeados')}
+            className={`px-3 py-1 rounded-xl text-xs font-black transition-all shrink-0 ${
+              statusFilter === 'mapeados'
+                ? 'bg-emerald-500 text-white shadow-sm'
+                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+            }`}
+          >
+            100% Mapeadas
+          </button>
+        </div>
+      </div>
+
+      {/* ── Loading ── */}
+      {loading && (
+        <div className="flex flex-col items-center justify-center py-16 gap-3">
+          <Loader2 className="animate-spin text-blue-600" size={36} />
+          <p className="text-sm text-slate-400 font-medium">Carregando resumo das locações...</p>
+        </div>
+      )}
+
+      {/* ── Erro ── */}
+      {error && !loading && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-5 flex items-start gap-3">
+          <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={20} />
+          <div>
+            <p className="font-bold text-red-700 text-sm">Falha ao carregar</p>
+            <p className="text-xs text-red-500 mt-0.5">{error}</p>
+            <button
+              onClick={carregarLocacoes}
+              className="mt-2 text-xs font-bold text-red-600 flex items-center gap-1 hover:text-red-800 transition-colors"
+            >
+              <RefreshCw size={12} /> Tentar novamente
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Lista de Locações ── */}
+      {!loading && !error && (
+        <div className="space-y-3">
+          {locacoesFiltradas.length === 0 ? (
+            <div className="text-center py-12 bg-white rounded-3xl border border-slate-100">
+              <MapPin size={32} className="text-slate-300 mx-auto mb-2" />
+              <p className="text-sm font-bold text-slate-500">Nenhuma locação encontrada</p>
+              <p className="text-xs text-slate-400 mt-0.5">Tente ajustar o termo de busca ou o filtro selecionado.</p>
+            </div>
+          ) : (
+            locacoesFiltradas.map(l => (
+              <LocacaoCard
+                key={l.locacao}
+                resumo={l}
+                expanded={expandedLocs.has(l.locacao)}
+                onToggleExpand={() => toggleExpand(l.locacao)}
+                onMapear={onStartTimer}
+              />
+            ))
+          )}
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+// ── Componente principal CheckKD ──────────────────────────────────────
 export default function CheckKD({ onStartTimer }: CheckKDProps) {
+  // Aba principal: 'kd' (Check por KD) ou 'locacao' (Resumo por Locação)
+  const [mainTab, setMainTab] = useState<'kd' | 'locacao'>('kd');
+
+  // Estados para a aba Check por KD
   const [mode, setMode] = useState<'camera' | 'qr' | 'manual'>('qr');
   const [inputValue, setInputValue] = useState(() => sessionStorage.getItem('LAST_CHECKED_KD_KEY') || '');
   const [loading, setLoading] = useState(false);
@@ -193,16 +621,19 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
 
   // Controlar câmera com Html5Qrcode
   useEffect(() => {
-    if (mode === 'camera') {
+    if (mainTab === 'kd' && mode === 'camera') {
       let isMounted = true;
       setCameraError(null);
 
       const startScanner = async () => {
         try {
-          // Garante parada de scanner anterior se houver
           if (scannerRef.current) {
             try { await scannerRef.current.stop(); } catch {}
           }
+
+          // Aguarda um frame para garantir que o elemento #qr-reader esteja montado no DOM
+          await new Promise(r => setTimeout(r, 150));
+          if (!isMounted || !document.getElementById("qr-reader")) return;
 
           const html5Qrcode = new Html5Qrcode("qr-reader");
           scannerRef.current = html5Qrcode;
@@ -214,16 +645,13 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
               if (isMounted) {
                 setInputValue(decodedText);
                 buscar(decodedText);
-                // Fecha a câmera e muda para a visualização dos resultados
                 setMode('qr');
                 try {
                   html5Qrcode.stop().catch(() => {});
                 } catch {}
               }
             },
-            () => {
-              // Ignore scan errors while searching frame
-            }
+            () => {}
           );
           if (isMounted) setCameraActive(true);
         } catch (err: any) {
@@ -253,23 +681,24 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
       }
       setCameraActive(false);
     }
-  }, [mode, buscar]);
+  }, [mainTab, mode, buscar]);
 
   // Auto-foco e auto-recarregamento ao voltar para a aba
   useEffect(() => {
-    const saved = sessionStorage.getItem('LAST_CHECKED_KD_KEY');
-    if (saved) {
-      buscar(saved);
+    if (mainTab === 'kd') {
+      const saved = sessionStorage.getItem('LAST_CHECKED_KD_KEY');
+      if (saved) {
+        buscar(saved);
+      }
     }
-  }, [buscar]);
+  }, [mainTab, buscar]);
 
   useEffect(() => {
-    if (mode === 'qr' || mode === 'manual') {
+    if (mainTab === 'kd' && (mode === 'qr' || mode === 'manual')) {
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [mode]);
+  }, [mainTab, mode]);
 
-  // Detecta leitura do scanner (Enter automático ou string rápida)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       buscar(inputValue);
@@ -291,252 +720,289 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-24">
 
-      {/* ── Header ── */}
-      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
-            style={{ background: 'rgba(0,102,178,0.1)' }}>
-            <QrCode size={22} style={{ color: '#0066b2' }} />
-          </div>
-          <div>
-            <h2 className="text-lg font-black text-slate-800 tracking-tight">Check de KD</h2>
-            <p className="text-xs text-slate-400">Escaneie o QR Code da caixa ou digite a chave</p>
-          </div>
-        </div>
+      {/* ── Navegação por Abas do Check KD ── */}
+      <div className="flex bg-slate-200/80 p-1.5 rounded-2xl gap-1 shadow-inner">
+        <button
+          onClick={() => setMainTab('kd')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black transition-all ${
+            mainTab === 'kd'
+              ? 'bg-white text-slate-800 shadow-md scale-[1.01]'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <QrCode size={16} style={{ color: mainTab === 'kd' ? '#0066b2' : undefined }} />
+          <span>Check por KD</span>
+        </button>
 
-        {/* Toggle 3 Modos: Câmera | Leitor USB | Digitar */}
-        <div className="flex bg-slate-100 rounded-xl p-1 gap-1 mb-4 overflow-x-auto">
-          <button
-            onClick={() => setMode('camera')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
-              mode === 'camera' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Camera size={14} /> Câmera ao Vivo
-          </button>
-          <button
-            onClick={() => setMode('qr')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
-              mode === 'qr' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <ScanLine size={14} /> Leitor Bip / USB
-          </button>
-          <button
-            onClick={() => setMode('manual')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
-              mode === 'manual' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Keyboard size={14} /> Digitar Chave
-          </button>
-        </div>
-
-        {/* Câmera Scanner interativo */}
-        {mode === 'camera' && (
-          <div className="mb-4 space-y-2">
-            <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-video flex items-center justify-center">
-              <div id="qr-reader" className="w-full h-full border-none [&_video]:object-cover" />
-              {!cameraActive && !cameraError && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-950/80 gap-2">
-                  <Loader2 className="animate-spin text-blue-500" size={28} />
-                  <span className="text-xs font-medium">Iniciando câmera...</span>
-                </div>
-              )}
-              {cameraError && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 bg-slate-950/90 p-4 text-center gap-2">
-                  <AlertCircle size={28} />
-                  <span className="text-xs font-bold">{cameraError}</span>
-                  <button
-                    onClick={() => setMode('qr')}
-                    className="mt-2 text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700"
-                  >
-                    Usar Leitor USB / Digitação
-                  </button>
-                </div>
-              )}
-            </div>
-            <p className="text-[11px] text-slate-400 text-center font-medium">
-              📷 Aponte a câmera do dispositivo para o QR Code da caixa
-            </p>
-          </div>
-        )}
-
-        {/* Campo de entrada (funciona para scanner e digitação) */}
-        <div className="relative">
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300">
-            {mode === 'camera' ? <Camera size={18} /> : mode === 'qr' ? <ScanLine size={18} /> : <Search size={18} />}
-          </div>
-          <input
-            ref={inputRef}
-            type="text"
-            value={inputValue}
-            onChange={e => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              mode === 'camera'
-                ? 'Chave lida pela câmera aparecerá aqui...'
-                : mode === 'qr'
-                ? 'Aguardando leitura do scanner... (Enter para buscar)'
-                : 'Ex: HDAK80F09003/201800125449 (espaços são ignorados)'
-            }
-            className="w-full pl-10 pr-24 py-3.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:border-transparent transition-all"
-            style={{ '--tw-ring-color': '#0066b2' } as any}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
-            {inputValue && (
-              <button onClick={handleLimpar} className="p-1.5 text-slate-300 hover:text-red-500 transition-colors">
-                <X size={16} />
-              </button>
-            )}
-            <button
-              onClick={() => buscar(inputValue)}
-              disabled={!inputValue.trim() || loading}
-              className="flex items-center gap-1.5 text-xs font-black text-white px-3 py-1.5 rounded-lg transition-all disabled:opacity-40"
-              style={{ background: '#0066b2' }}
-            >
-              {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-              {loading ? '' : 'Buscar'}
-            </button>
-          </div>
-        </div>
-
-        <p className="text-[10px] text-slate-300 mt-2 text-center">
-          💡 Espaços na chave são removidos automaticamente antes da busca
-        </p>
+        <button
+          onClick={() => setMainTab('locacao')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black transition-all ${
+            mainTab === 'locacao'
+              ? 'bg-white text-slate-800 shadow-md scale-[1.01]'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <MapPin size={16} style={{ color: mainTab === 'locacao' ? '#0066b2' : undefined }} />
+          <span>Resumo por Locação</span>
+        </button>
       </div>
 
-      {/* ── Loading ── */}
-      {loading && (
-        <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <Loader2 className="animate-spin text-blue-600" size={36} />
-          <p className="text-sm text-slate-400 font-medium">Consultando base de dados...</p>
-        </div>
+      {/* ── Conteúdo da Aba Resumo por Locação ── */}
+      {mainTab === 'locacao' && (
+        <ResumoLocacoesView onStartTimer={onStartTimer} />
       )}
 
-      {/* ── Erro ── */}
-      {error && !loading && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-red-50 border border-red-200 rounded-2xl p-5 flex items-start gap-3"
-        >
-          <AlertCircle className="text-red-500 flex-shrink-0 mt-0.5" size={20} />
-          <div>
-            <p className="font-bold text-red-700 text-sm">Não encontrado</p>
-            <p className="text-xs text-red-500 mt-0.5">{error}</p>
-            <button
-              onClick={handleLimpar}
-              className="mt-2 text-xs font-bold text-red-600 flex items-center gap-1 hover:text-red-800 transition-colors"
-            >
-              <RefreshCw size={12} /> Tentar novamente
-            </button>
-          </div>
-        </motion.div>
-      )}
-
-      {/* ── Resultados ── */}
-      {itens && !loading && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="space-y-4"
-        >
-          {/* Sumário do KD */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Boxes size={18} className="text-slate-400" />
-                <span className="text-xs font-black text-slate-500 uppercase tracking-widest">KD Encontrado</span>
+      {/* ── Conteúdo da Aba Check por KD ── */}
+      {mainTab === 'kd' && (
+        <>
+          {/* Header da busca KD */}
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
+                style={{ background: 'rgba(0,102,178,0.1)' }}>
+                <QrCode size={22} style={{ color: '#0066b2' }} />
               </div>
+              <div>
+                <h2 className="text-lg font-black text-slate-800 tracking-tight">Check de KD</h2>
+                <p className="text-xs text-slate-400">Escaneie o QR Code da caixa ou digite a chave</p>
+              </div>
+            </div>
+
+            {/* Toggle 3 Modos: Câmera | Leitor USB | Digitar */}
+            <div className="flex bg-slate-100 rounded-xl p-1 gap-1 mb-4 overflow-x-auto">
               <button
-                onClick={() => buscar(chaveAtual)}
-                className="text-xs font-bold text-blue-600 flex items-center gap-1 hover:text-blue-800 transition-colors"
+                onClick={() => setMode('camera')}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+                  mode === 'camera' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900'
+                }`}
               >
-                <RefreshCw size={12} /> Atualizar
+                <Camera size={14} /> Câmera ao Vivo
+              </button>
+              <button
+                onClick={() => setMode('qr')}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+                  mode === 'qr' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <ScanLine size={14} /> Leitor Bip / USB
+              </button>
+              <button
+                onClick={() => setMode('manual')}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+                  mode === 'manual' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Keyboard size={14} /> Digitar Chave
               </button>
             </div>
 
-            <p className="font-mono text-xs text-slate-400 mb-3 break-all">{chaveAtual}</p>
+            {/* Câmera Scanner interativo */}
+            {mode === 'camera' && (
+              <div className="mb-4 space-y-2">
+                <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-video flex items-center justify-center">
+                  <div id="qr-reader" className="w-full h-full border-none [&_video]:object-cover" />
+                  {!cameraActive && !cameraError && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-950/80 gap-2">
+                      <Loader2 className="animate-spin text-blue-500" size={28} />
+                      <span className="text-xs font-medium">Iniciando câmera...</span>
+                    </div>
+                  )}
+                  {cameraError && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 bg-slate-950/90 p-4 text-center gap-2">
+                      <AlertCircle size={28} />
+                      <span className="text-xs font-bold">{cameraError}</span>
+                      <button
+                        onClick={() => setMode('qr')}
+                        className="mt-2 text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700"
+                      >
+                        Usar Leitor USB / Digitação
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 text-center font-medium">
+                  📷 Aponte a câmera do dispositivo para o QR Code da caixa
+                </p>
+              </div>
+            )}
 
-            <div className="grid grid-cols-3 gap-3">
-              <div className="text-center bg-slate-50 rounded-xl p-2">
-                <span className="text-2xl font-black text-slate-800">{itens.length}</span>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total SKUs</p>
+            {/* Campo de entrada (funciona para scanner e digitação) */}
+            <div className="relative">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300">
+                {mode === 'camera' ? <Camera size={18} /> : mode === 'qr' ? <ScanLine size={18} /> : <Search size={18} />}
               </div>
-              <div className="text-center bg-emerald-50 rounded-xl p-2">
-                <span className="text-2xl font-black text-emerald-600">{mapeados}</span>
-                <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Mapeados</p>
-              </div>
-              <div className="text-center bg-amber-50 rounded-xl p-2">
-                <span className="text-2xl font-black text-amber-600">{pendentes}</span>
-                <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Pendentes</p>
-              </div>
-            </div>
-
-            {/* Barra de progresso */}
-            <div className="mt-3 bg-slate-100 rounded-full h-2 overflow-hidden">
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: `${itens.length > 0 ? (mapeados / itens.length) * 100 : 0}%` }}
-                transition={{ duration: 0.6, ease: 'easeOut' }}
-                className="h-full rounded-full bg-emerald-500"
+              <input
+                ref={inputRef}
+                type="text"
+                value={inputValue}
+                onChange={e => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  mode === 'camera'
+                    ? 'Chave lida pela câmera aparecerá aqui...'
+                    : mode === 'qr'
+                    ? 'Aguardando leitura do scanner... (Enter para buscar)'
+                    : 'Ex: HDAK80F09003/201800125449 (espaços são ignorados)'
+                }
+                className="w-full pl-10 pr-24 py-3.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:border-transparent transition-all"
+                style={{ '--tw-ring-color': '#0066b2' } as any}
+                autoComplete="off"
+                spellCheck={false}
               />
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
+                {inputValue && (
+                  <button onClick={handleLimpar} className="p-1.5 text-slate-300 hover:text-red-500 transition-colors">
+                    <X size={16} />
+                  </button>
+                )}
+                <button
+                  onClick={() => buscar(inputValue)}
+                  disabled={!inputValue.trim() || loading}
+                  className="flex items-center gap-1.5 text-xs font-black text-white px-3 py-1.5 rounded-lg transition-all disabled:opacity-40"
+                  style={{ background: '#0066b2' }}
+                >
+                  {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                  {loading ? '' : 'Buscar'}
+                </button>
+              </div>
             </div>
-            <p className="text-[10px] text-slate-400 text-center mt-1">
-              {itens.length > 0 ? Math.round((mapeados / itens.length) * 100) : 0}% mapeado
+
+            <p className="text-[10px] text-slate-300 mt-2 text-center">
+              💡 Espaços na chave são removidos automaticamente antes da busca
             </p>
           </div>
 
-          {/* Lista de itens */}
-          <div className="space-y-3">
-            {/* Pendentes primeiro */}
-            {itens
-              .sort((a, b) => {
-                const aM = a.tp?.status === 'mapeado' ? 1 : 0;
-                const bM = b.tp?.status === 'mapeado' ? 1 : 0;
-                return aM - bM;
-              })
-              .map((item, idx) => (
-                <ItemCard
-                  key={`${item.sku}-${idx}`}
-                  item={item}
-                  onMapear={(sku) => onStartTimer(sku)}
-                />
-              ))}
-          </div>
+          {/* ── Loading ── */}
+          {loading && (
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <Loader2 className="animate-spin text-blue-600" size={36} />
+              <p className="text-sm text-slate-400 font-medium">Consultando base de dados...</p>
+            </div>
+          )}
 
-          {pendentes === 0 && (
+          {/* ── Erro ── */}
+          {error && !loading && (
             <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
+              initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="text-center py-8"
+              className="bg-red-50 border border-red-200 rounded-2xl p-5 flex items-start gap-3"
             >
-              <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <CheckCircle2 size={32} className="text-emerald-500" />
+              <AlertCircle className="text-red-500 flex-shrink-0 mt-0.5" size={20} />
+              <div>
+                <p className="font-bold text-red-700 text-sm">Não encontrado</p>
+                <p className="text-xs text-red-500 mt-0.5">{error}</p>
+                <button
+                  onClick={handleLimpar}
+                  className="mt-2 text-xs font-bold text-red-600 flex items-center gap-1 hover:text-red-800 transition-colors"
+                >
+                  <RefreshCw size={12} /> Tentar novamente
+                </button>
               </div>
-              <h3 className="text-lg font-black text-slate-700">KD 100% Mapeado!</h3>
-              <p className="text-sm text-slate-400 mt-1">Todos os itens deste KD possuem T&P registrado.</p>
             </motion.div>
           )}
-        </motion.div>
-      )}
 
-      {/* ── Estado inicial ── */}
-      {!itens && !loading && !error && (
-        <div className="text-center py-16">
-          <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto mb-4">
-            <Package size={36} className="text-slate-200" />
-          </div>
-          <h3 className="text-base font-bold text-slate-400">Aguardando leitura</h3>
-          <p className="text-xs text-slate-300 mt-1">
-            {mode === 'qr'
-              ? 'Aponte o scanner para o QR Code da caixa'
-              : 'Digite ou cole a chave do KD acima'}
-          </p>
-        </div>
+          {/* ── Resultados ── */}
+          {itens && !loading && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="space-y-4"
+            >
+              {/* Sumário do KD */}
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Boxes size={18} className="text-slate-400" />
+                    <span className="text-xs font-black text-slate-500 uppercase tracking-widest">KD Encontrado</span>
+                  </div>
+                  <button
+                    onClick={() => buscar(chaveAtual)}
+                    className="text-xs font-bold text-blue-600 flex items-center gap-1 hover:text-blue-800 transition-colors"
+                  >
+                    <RefreshCw size={12} /> Atualizar
+                  </button>
+                </div>
+
+                <p className="font-mono text-xs text-slate-400 mb-3 break-all">{chaveAtual}</p>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="text-center bg-slate-50 rounded-xl p-2">
+                    <span className="text-2xl font-black text-slate-800">{itens.length}</span>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total SKUs</p>
+                  </div>
+                  <div className="text-center bg-emerald-50 rounded-xl p-2">
+                    <span className="text-2xl font-black text-emerald-600">{mapeados}</span>
+                    <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Mapeados</p>
+                  </div>
+                  <div className="text-center bg-amber-50 rounded-xl p-2">
+                    <span className="text-2xl font-black text-amber-600">{pendentes}</span>
+                    <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Pendentes</p>
+                  </div>
+                </div>
+
+                {/* Barra de progresso */}
+                <div className="mt-3 bg-slate-100 rounded-full h-2 overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${itens.length > 0 ? (mapeados / itens.length) * 100 : 0}%` }}
+                    transition={{ duration: 0.6, ease: 'easeOut' }}
+                    className="h-full rounded-full bg-emerald-500"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 text-center mt-1">
+                  {itens.length > 0 ? Math.round((mapeados / itens.length) * 100) : 0}% mapeado
+                </p>
+              </div>
+
+              {/* Lista de itens */}
+              <div className="space-y-3">
+                {/* Pendentes primeiro */}
+                {itens
+                  .sort((a, b) => {
+                    const aM = a.tp?.status === 'mapeado' ? 1 : 0;
+                    const bM = b.tp?.status === 'mapeado' ? 1 : 0;
+                    return aM - bM;
+                  })
+                  .map((item, idx) => (
+                    <ItemCard
+                      key={`${item.sku}-${idx}`}
+                      item={item}
+                      onMapear={(sku) => onStartTimer(sku)}
+                    />
+                  ))}
+              </div>
+
+              {pendentes === 0 && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="text-center py-8"
+                >
+                  <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <CheckCircle2 size={32} className="text-emerald-500" />
+                  </div>
+                  <h3 className="text-lg font-black text-slate-700">KD 100% Mapeado!</h3>
+                  <p className="text-sm text-slate-400 mt-1">Todos os itens deste KD possuem T&P registrado.</p>
+                </motion.div>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── Estado inicial ── */}
+          {!itens && !loading && !error && (
+            <div className="text-center py-16">
+              <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto mb-4">
+                <Package size={36} className="text-slate-200" />
+              </div>
+              <h3 className="text-base font-bold text-slate-400">Aguardando leitura</h3>
+              <p className="text-xs text-slate-300 mt-1">
+                {mode === 'qr'
+                  ? 'Aponte o scanner para o QR Code da caixa'
+                  : 'Digite ou cole a chave do KD acima'}
+              </p>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
