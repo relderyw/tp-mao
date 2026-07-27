@@ -15,7 +15,7 @@ interface MappingWorkspaceProps {
   onClose?: () => void;
 }
 
-// Configuração dos 6 sub-processos — 3 tomadas cada (t1 a t3, conforme colunas existentes no banco)
+// Configuração dos 6 sub-processos — 3 tomadas cada (t1 a t3) + qtd + res (média)
 const PROCESS_CONFIGS = [
   {
     id: 'pegar_ik',
@@ -24,7 +24,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-cyan-500/10',
     textColor: 'text-cyan-400',
     btnColor: 'bg-cyan-500 hover:bg-cyan-600',
-    t1Key: 'pegar_ik_t1', t2Key: 'pegar_ik_t2', t3Key: 'pegar_ik_t3', resKey: 'pegar_ik_res'
+    t1Key: 'pegar_ik_t1', t2Key: 'pegar_ik_t2', t3Key: 'pegar_ik_t3', qtdKey: 'pegar_ik_qtd', resKey: 'pegar_ik_res'
   },
   {
     id: 'abrir',
@@ -33,7 +33,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-orange-500/10',
     textColor: 'text-orange-400',
     btnColor: 'bg-orange-500 hover:bg-orange-600',
-    t1Key: 'abrir_t1', t2Key: 'abrir_t2', t3Key: 'abrir_t3', resKey: 'abrir_res'
+    t1Key: 'abrir_t1', t2Key: 'abrir_t2', t3Key: 'abrir_t3', qtdKey: 'abrir_qtd', resKey: 'abrir_res'
   },
   {
     id: 'form',
@@ -42,7 +42,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-emerald-500/10',
     textColor: 'text-emerald-400',
     btnColor: 'bg-emerald-500 hover:bg-emerald-600',
-    t1Key: 'form_t1', t2Key: 'form_t2', t3Key: 'form_t3', resKey: 'form_res'
+    t1Key: 'form_t1', t2Key: 'form_t2', t3Key: 'form_t3', qtdKey: 'form_qtd', resKey: 'form_res'
   },
   {
     id: 'desc',
@@ -51,7 +51,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-purple-500/10',
     textColor: 'text-purple-400',
     btnColor: 'bg-purple-500 hover:bg-purple-600',
-    t1Key: 'desc_t1', t2Key: 'desc_t2', t3Key: 'desc_t3', resKey: 'desc_res'
+    t1Key: 'desc_t1', t2Key: 'desc_t2', t3Key: 'desc_t3', qtdKey: 'desc_qtd', resKey: 'desc_res'
   },
   {
     id: 'etq',
@@ -60,7 +60,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-blue-500/10',
     textColor: 'text-blue-400',
     btnColor: 'bg-blue-500 hover:bg-blue-600',
-    t1Key: 'etq_t1', t2Key: 'etq_t2', t3Key: 'etq_t3', resKey: 'etq_res'
+    t1Key: 'etq_t1', t2Key: 'etq_t2', t3Key: 'etq_t3', qtdKey: 'etq_qtd', resKey: 'etq_res'
   },
   {
     id: 'pos',
@@ -69,7 +69,7 @@ const PROCESS_CONFIGS = [
     bgColor: 'bg-amber-500/10',
     textColor: 'text-amber-400',
     btnColor: 'bg-amber-500 hover:bg-amber-600',
-    t1Key: 'pos_t1', t2Key: 'pos_t2', t3Key: 'pos_t3', resKey: 'pos_res'
+    t1Key: 'pos_t1', t2Key: 'pos_t2', t3Key: 'pos_t3', qtdKey: 'pos_qtd', resKey: 'pos_res'
   }
 ] as const;
 
@@ -88,6 +88,9 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
 
   // Estado do sub-processo ativo
   const [activeProcessId, setActiveProcessId] = useState<string>('pegar_ik');
+
+  // QTD por processo (quantidade de unidades mapeadas naquele tempo)
+  const [processQtd, setProcessQtd] = useState<Record<string, string>>({});
 
   // Cronômetro — usa ref para o startTime para evitar recriação do interval a cada tick
   const [time, setTime] = useState<number>(0);
@@ -156,7 +159,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
 
   const selectedSku = skus[selectedSkuIndex] || null;
 
-  // Sincroniza itemInfo quando troca de SKU
+  // Sincroniza itemInfo e processQtd quando troca de SKU
   useEffect(() => {
     if (selectedSku) {
       setItemInfo({
@@ -169,6 +172,13 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
         form_unid: selectedSku.form_unid || '',
         form_qtd: selectedSku.form_qtd != null ? String(selectedSku.form_qtd) : '',
       });
+      // Sincroniza QTD de cada processo com o valor do banco
+      const qtdMap: Record<string, string> = {};
+      PROCESS_CONFIGS.forEach(proc => {
+        const dbVal = (selectedSku as any)[proc.qtdKey];
+        qtdMap[proc.id] = dbVal != null ? String(dbVal) : '';
+      });
+      setProcessQtd(qtdMap);
       setInfoSaved(false);
     }
   }, [selectedSkuIndex, skus]);
@@ -282,9 +292,12 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     const validTs = [currentT1, currentT2, currentT3].filter(v => v > 0);
     const avg = validTs.length > 0 ? Number((validTs.reduce((a, b) => a + b, 0) / validTs.length).toFixed(2)) : 0;
 
+    // Inclui a QTD do processo
+    const qtdVal = processQtd[procConfig.id];
     const fieldsToSave: Partial<SkuTp> = {
       [targetKey]: tVal,
-      [procConfig.resKey]: avg
+      [procConfig.resKey]: avg,
+      [procConfig.qtdKey]: qtdVal ? Number(qtdVal) : null
     };
 
     const updated = await saveSubProcessMeasurements(selectedSku.sku, fieldsToSave, operatorName);
@@ -726,6 +739,19 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                             </div>
                           ))}
                         </div>
+                      </div>
+
+                      {/* Campo QTD — Quantidade de peças mapeadas neste sub-processo */}
+                      <div className="flex items-center gap-3 px-1">
+                        <label className={`text-xs font-black uppercase tracking-wider ${proc.textColor} whitespace-nowrap`}>QTD (Unid.)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={processQtd[proc.id] || ''}
+                          onChange={e => setProcessQtd(prev => ({ ...prev, [proc.id]: e.target.value }))}
+                          placeholder="Ex: 25"
+                          className="flex-1 bg-[#111319] border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm font-mono font-bold placeholder-slate-600 focus:border-orange-500/50 focus:outline-none transition-colors text-center"
+                        />
                       </div>
 
                       {/* Botões Principais de Ação */}
