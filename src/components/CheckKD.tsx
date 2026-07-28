@@ -592,9 +592,12 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
   const [chaveAtual, setChaveAtual] = useState(() => sessionStorage.getItem('LAST_CHECKED_KD_KEY') || '');
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isStoppingRef = useRef(false);
+  const lastDecodedRef = useRef<string | null>(null);
 
   const buscar = useCallback(async (raw: string) => {
     const chave = raw.replace(/\s+/g, '').toUpperCase().trim();
@@ -609,8 +612,10 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
       const resultado = await getItensByChave(chave);
       if (resultado.length === 0) {
         setError(`Nenhum item encontrado para a chave: ${chave}`);
+        setItens(null);
       } else {
         setItens(resultado);
+        setLastUpdated(new Date());
       }
     } catch (err: any) {
       setError('Erro ao consultar o banco: ' + (err.message || 'Falha de conexão'));
@@ -621,19 +626,46 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
 
   // Controlar câmera com Html5Qrcode
   useEffect(() => {
+    let isMounted = true;
+
+    async function stopScannerCompletamente(): Promise<void> {
+      if (isStoppingRef.current) return;
+      if (!scannerRef.current) return;
+      isStoppingRef.current = true;
+      try {
+        try {
+          await scannerRef.current.stop();
+        } catch {}
+        try {
+          await scannerRef.current.clear();
+        } catch {}
+      } finally {
+        scannerRef.current = null;
+        isStoppingRef.current = false;
+        if (isMounted) {
+          setCameraActive(false);
+        }
+      }
+    }
+
     if (mainTab === 'kd' && mode === 'camera') {
-      let isMounted = true;
       setCameraError(null);
 
       const startScanner = async () => {
-        try {
-          if (scannerRef.current) {
-            try { await scannerRef.current.stop(); } catch {}
-          }
+        await stopScannerCompletamente();
+        if (!isMounted) return;
 
-          // Aguarda um frame para garantir que o elemento #qr-reader esteja montado no DOM
-          await new Promise(r => setTimeout(r, 150));
-          if (!isMounted || !document.getElementById("qr-reader")) return;
+        try {
+          // Garante que o elemento #qr-reader existe no DOM antes de prosseguir
+          let tries = 0;
+          while (!document.getElementById("qr-reader") && tries < 20) {
+            await new Promise(r => setTimeout(r, 80));
+            tries++;
+          }
+          if (!isMounted) return;
+          if (!document.getElementById("qr-reader")) {
+            throw new Error("Elemento do leitor de QR não encontrado no DOM.");
+          }
 
           const html5Qrcode = new Html5Qrcode("qr-reader");
           scannerRef.current = html5Qrcode;
@@ -641,15 +673,25 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
           await html5Qrcode.start(
             { facingMode: "environment" },
             { fps: 10, qrbox: { width: 250, height: 250 } },
-            (decodedText) => {
-              if (isMounted) {
-                setInputValue(decodedText);
+            async (decodedText) => {
+              if (!isMounted) return;
+              // Bloqueia múltiplas detecções do mesmo código
+              if (lastDecodedRef.current === decodedText) return;
+              lastDecodedRef.current = decodedText;
+
+              // 1) Para completamente a câmera primeiro (libera câmera e limpa DOM)
+              await stopScannerCompletamente();
+              if (!isMounted) return;
+
+              // 2) Atualiza interface e realiza a busca APÓS câmera estar desligada
+              setInputValue(decodedText);
+              setMode('qr');
+              // Atraso mínimo para garantir troca de modo concluída
+              setTimeout(() => {
                 buscar(decodedText);
-                setMode('qr');
-                try {
-                  html5Qrcode.stop().catch(() => {});
-                } catch {}
-              }
+                // Reseta o último decodificado após busca para permitir reuso futuro
+                setTimeout(() => { lastDecodedRef.current = null; }, 1500);
+              }, 60);
             },
             () => {}
           );
@@ -667,19 +709,15 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
 
       return () => {
         isMounted = false;
-        if (scannerRef.current) {
-          scannerRef.current.stop().catch(() => {}).finally(() => {
-            scannerRef.current = null;
-          });
-        }
+        stopScannerCompletamente();
       };
     } else {
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {}).finally(() => {
-          scannerRef.current = null;
-        });
-      }
       setCameraActive(false);
+      stopScannerCompletamente();
+
+      return () => {
+        isMounted = false;
+      };
     }
   }, [mainTab, mode, buscar]);
 
@@ -762,10 +800,26 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
                 style={{ background: 'rgba(0,102,178,0.1)' }}>
                 <QrCode size={22} style={{ color: '#0066b2' }} />
               </div>
-              <div>
+              <div className="flex-1 min-w-0">
                 <h2 className="text-lg font-black text-slate-800 tracking-tight">Check de KD</h2>
-                <p className="text-xs text-slate-400">Escaneie o QR Code da caixa ou digite a chave</p>
+                <p className="text-xs text-slate-400 truncate">
+                  Escaneie o QR Code da caixa ou digite a chave
+                  {lastUpdated && (
+                    <span className="ml-2 text-[10px] text-slate-400 font-mono">
+                      · Última atualização: {lastUpdated.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </p>
               </div>
+              <button
+                onClick={() => chaveAtual ? buscar(chaveAtual) : null}
+                disabled={!chaveAtual || loading}
+                className="flex items-center gap-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 px-3 py-2 rounded-xl transition-all shrink-0"
+                title={chaveAtual ? 'Atualizar dados do KD atual' : 'Nenhum KD consultado ainda'}
+              >
+                <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                <span className="hidden sm:inline">Atualizar</span>
+              </button>
             </div>
 
             {/* Toggle 3 Modos: Câmera | Leitor USB | Digitar */}
@@ -796,35 +850,33 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
               </button>
             </div>
 
-            {/* Câmera Scanner interativo */}
-            {mode === 'camera' && (
-              <div className="mb-4 space-y-2">
-                <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-video flex items-center justify-center">
-                  <div id="qr-reader" className="w-full h-full border-none [&_video]:object-cover" />
-                  {!cameraActive && !cameraError && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-950/80 gap-2">
-                      <Loader2 className="animate-spin text-blue-500" size={28} />
-                      <span className="text-xs font-medium">Iniciando câmera...</span>
-                    </div>
-                  )}
-                  {cameraError && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 bg-slate-950/90 p-4 text-center gap-2">
-                      <AlertCircle size={28} />
-                      <span className="text-xs font-bold">{cameraError}</span>
-                      <button
-                        onClick={() => setMode('qr')}
-                        className="mt-2 text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700"
-                      >
-                        Usar Leitor USB / Digitação
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <p className="text-[11px] text-slate-400 text-center font-medium">
-                  📷 Aponte a câmera do dispositivo para o QR Code da caixa
-                </p>
+            {/* Câmera Scanner interativo (sempre no DOM — exibição via CSS) */}
+            <div className={`mb-4 space-y-2 ${mode === 'camera' ? 'block' : 'hidden'}`}>
+              <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-video flex items-center justify-center">
+                <div id="qr-reader" className="w-full h-full border-none [&_video]:object-cover" />
+                {!cameraActive && !cameraError && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-950/80 gap-2">
+                    <Loader2 className="animate-spin text-blue-500" size={28} />
+                    <span className="text-xs font-medium">Iniciando câmera...</span>
+                  </div>
+                )}
+                {cameraError && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 bg-slate-950/90 p-4 text-center gap-2">
+                    <AlertCircle size={28} />
+                    <span className="text-xs font-bold">{cameraError}</span>
+                    <button
+                      onClick={() => setMode('qr')}
+                      className="mt-2 text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700"
+                    >
+                      Usar Leitor USB / Digitação
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
+              <p className="text-[11px] text-slate-400 text-center font-medium">
+                📷 Aponte a câmera do dispositivo para o QR Code da caixa
+              </p>
+            </div>
 
             {/* Campo de entrada (funciona para scanner e digitação) */}
             <div className="relative">

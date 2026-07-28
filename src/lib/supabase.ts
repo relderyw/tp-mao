@@ -308,8 +308,13 @@ export async function getDashboardAnalytics(): Promise<DashboardData> {
   const andamento = data.filter(d => d.status === 'andamento').length;
   const pendentes = total - concluidos - andamento;
 
-  // Hoje no formato YYYY-MM-DD
-  const todayStr = new Date().toISOString().split('T')[0];
+  // Usa DATA LOCAL DO NAVEGADOR (não UTC) para bater com fusos como Manaus (UTC-4)
+  // ex: 22:00 do dia 27 local = 02:00 dia 28 UTC — queremos "hoje" = dia 27
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  const todayStr = `${y}-${m}-${d}`;
 
   // 1. Agrupamento por Analista (responsavel)
   const analistasMap = new Map<string, { hoje: number; total: number; tempos: number[]; timestamps: number[] }>();
@@ -549,7 +554,11 @@ export async function saveSubProcessMeasurements(
   const hasSome = spKeys.some(k => merged[k as keyof SkuTp] != null);
   const hasAll = spKeys.every(k => merged[k as keyof SkuTp] != null);
 
-  if (hasAll) {
+  // Preserva status "mapeado" caso já tenha sido confirmado manualmente (mesmo que incompleto)
+  const jaMapeado = currentTp.status === 'mapeado';
+  if (jaMapeado) {
+    merged.status = 'mapeado';
+  } else if (hasAll) {
     merged.status = 'mapeado';
   } else if (hasSome) {
     merged.status = 'andamento';
@@ -572,6 +581,51 @@ export async function saveSubProcessMeasurements(
 
   if (error) {
     console.error('Erro ao salvar medição:', error);
+    return null;
+  }
+  return updated;
+}
+
+/** Força um SKU a ter status 'mapeado' (conclusão manual mesmo com processos incompletos) */
+export async function confirmarMapeamentoForcado(
+  sku: string,
+  operatorName: string = 'Operador'
+): Promise<SkuTp | null> {
+  const { data: current } = await supabase
+    .from('sku_tp')
+    .select('*')
+    .eq('sku', sku)
+    .single();
+
+  const now = new Date();
+  const currentTp = current || { sku, status: 'pendente' };
+
+  // Calcula tempo_total atual com base nos valores já salvos
+  let total = 0;
+  ['abrir_res', 'form_res', 'desc_res', 'etq_res', 'pos_res', 'pegar_ik_res'].forEach(resKey => {
+    const val = (currentTp as any)[resKey];
+    if (typeof val === 'number') total += val;
+  });
+
+  const merged = {
+    ...currentTp,
+    tempo_total: Number(total.toFixed(2)),
+    status: 'mapeado' as const,
+    responsavel: operatorName,
+    data_map: (currentTp as any).data_map || now.toISOString(),
+    updated_at: now.toISOString()
+  };
+
+  const cleanMerged = sanitizeSkuTpPayload(merged, false);
+
+  const { data: updated, error } = await supabase
+    .from('sku_tp')
+    .upsert(cleanMerged, { onConflict: 'sku' })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Erro ao confirmar mapeamento forçado:', error);
     return null;
   }
   return updated;

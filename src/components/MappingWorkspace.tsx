@@ -6,7 +6,7 @@ import {
   Zap, FastForward, ArrowDownRight, Layers
 } from 'lucide-react';
 import {
-  getSkusList, getStatsTp, saveSubProcessMeasurements, SkuTp, StatsTp
+  getSkusList, getStatsTp, saveSubProcessMeasurements, SkuTp, StatsTp, confirmarMapeamentoForcado
 } from '../lib/supabase';
 import { getSession } from '../lib/auth';
 
@@ -114,8 +114,19 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     form_unid: '' as string,
     form_qtd: '' as string,
   });
+  const itemInfoSavedRef = useRef({
+    pecas_kd: '' as string,
+    tp_emb_forn: '' as string,
+    pd_emb_forn: '' as string,
+    tp_emb_dcc: '' as string,
+    pd_emb_dcc: '' as string,
+    carro: '' as string,
+    form_unid: '' as string,
+    form_qtd: '' as string,
+  });
   const [savingInfo, setSavingInfo] = useState(false);
   const [infoSaved, setInfoSaved] = useState(false);
+  const [confirmingMap, setConfirmingMap] = useState(false);
 
   // Carregar SKUs e estatísticas
   useEffect(() => {
@@ -162,7 +173,7 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
   // Sincroniza itemInfo e processQtd quando troca de SKU
   useEffect(() => {
     if (selectedSku) {
-      setItemInfo({
+      const newInfo = {
         pecas_kd: selectedSku.pecas_kd != null ? String(selectedSku.pecas_kd) : '',
         tp_emb_forn: selectedSku.tp_emb_forn || '',
         pd_emb_forn: selectedSku.pd_emb_forn || '',
@@ -171,7 +182,9 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
         carro: selectedSku.carro || '',
         form_unid: selectedSku.form_unid || '',
         form_qtd: selectedSku.form_qtd != null ? String(selectedSku.form_qtd) : '',
-      });
+      };
+      setItemInfo(newInfo);
+      itemInfoSavedRef.current = { ...newInfo };
       // Sincroniza QTD de cada processo com o valor do banco
       const qtdMap: Record<string, string> = {};
       PROCESS_CONFIGS.forEach(proc => {
@@ -183,9 +196,25 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     }
   }, [selectedSkuIndex, skus]);
 
+  // Compara itemInfo atual com o último salvo para detectar mudanças
+  const itemInfoIsDirty = (): boolean => {
+    const cur = itemInfo;
+    const sav = itemInfoSavedRef.current;
+    return (
+      cur.pecas_kd !== sav.pecas_kd ||
+      cur.tp_emb_forn !== sav.tp_emb_forn ||
+      cur.pd_emb_forn !== sav.pd_emb_forn ||
+      cur.tp_emb_dcc !== sav.tp_emb_dcc ||
+      cur.pd_emb_dcc !== sav.pd_emb_dcc ||
+      cur.carro !== sav.carro ||
+      cur.form_unid !== sav.form_unid ||
+      cur.form_qtd !== sav.form_qtd
+    );
+  };
+
   // Salva os campos adicionais do item
   const saveItemInfo = async () => {
-    if (!selectedSku) return;
+    if (!selectedSku) return false;
     setSavingInfo(true);
     const fields: Partial<SkuTp> = {
       pecas_kd: itemInfo.pecas_kd !== '' ? Number(itemInfo.pecas_kd) : null,
@@ -202,10 +231,22 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
       const newSkus = [...skus];
       newSkus[selectedSkuIndex] = updated;
       setSkus(newSkus);
+      itemInfoSavedRef.current = { ...itemInfo };
       setInfoSaved(true);
       setTimeout(() => setInfoSaved(false), 2000);
+      setSavingInfo(false);
+      return true;
     }
     setSavingInfo(false);
+    return false;
+  };
+
+  // Salva info do item SOMENTE se houver alterações pendentes (utilizado antes de ações do cronômetro)
+  const flushPendingItemInfo = async (): Promise<void> => {
+    if (!selectedSku) return;
+    if (itemInfoIsDirty()) {
+      await saveItemInfo();
+    }
   };
 
   // Lógica do cronômetro — NÃO inclui `time` nas dependências para não recriar o interval a cada tick
@@ -270,6 +311,10 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     keepRunningAfter: boolean = false
   ) => {
     if (!selectedSku) return null;
+
+    // ANTES de qualquer gravação de tempo, garante que as infos do item (FORN/DCC/Formatar) estão salvas no banco
+    await flushPendingItemInfo();
+
     const timeToRecord = customTimeSec !== undefined ? customTimeSec : time;
     if (timeToRecord === 0) return null;
 
@@ -367,20 +412,70 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     await recordTimeToProcess(currentProc, capturedTime, true);
   };
 
-  // ── Trocar de Sub-processo com auto-salvamento se houver tempo decorrido ──
+  // ── Trocar de Sub-processo com auto-salvamento e lógica inteligente ──
   const handleSelectProcess = async (targetProcId: string) => {
     if (targetProcId === activeProcessId) return;
 
-    // Se houver tempo rodando/decorrido no processo atual, salva automaticamente antes de trocar
-    if (time > 0) {
+    // Primeiro: flush de informações do item que podem estar pendentes
+    await flushPendingItemInfo();
+
+    // ── Lógica da cronometragem ao pular processos ──────────────────────────
+    // Se o cronômetro estava RODANDO (isRunning) ou TEM TEMPO ACUMULADO (timeRef > 0.1s):
+    //   → salva o tempo no processo anterior
+    //   → inicia automaticamente o cronômetro no novo processo
+    // Caso contrário (nenhum tempo tomado):
+    //   → só troca, NÃO inicia automaticamente
+    const estavaContandoTempo = isRunning || timeRef.current > 0.1;
+
+    if (timeRef.current > 0.1) {
       const currentProc = PROCESS_CONFIGS.find(p => p.id === activeProcessId);
       if (currentProc) {
-        await recordTimeToProcess(currentProc, time, false);
+        // Salva o tempo decorrido no processo atual, sem reiniciar (a gente controla manualmente abaixo)
+        await recordTimeToProcess(currentProc, timeRef.current, false);
       }
+    } else {
+      // Zera completamente caso não houvesse tempo a salvar
+      resetTimer();
     }
 
     setActiveProcessId(targetProcId);
-    resetTimer();
+
+    // Garante reset básico do cronômetro para a nova contagem começar do zero
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    timeRef.current = 0;
+    setTime(0);
+
+    // ↓ Regra principal: SÓ inicia automaticamente SE estava contando algo antes
+    if (estavaContandoTempo) {
+      startTimeRef.current = Date.now();
+      setIsRunning(true);
+      timerRef.current = window.setInterval(() => {
+        const elapsed = (Date.now() - startTimeRef.current) / 1000;
+        setTime(elapsed);
+        timeRef.current = elapsed;
+      }, 30);
+    } else {
+      setIsRunning(false);
+    }
+  };
+
+  // ── Confirmar Mapeamento (Marca item como mapeado mesmo incompleto) ──
+  const handleConfirmarMapeamento = async () => {
+    if (!selectedSku) return;
+    if (!confirm(`Deseja realmente confirmar o SKU ${selectedSku.sku} como MAREADO?\nMesmo que nem todos os processos tenham sido concluídos, o status passará a "Concluído".`)) return;
+
+    // Garante salvar infos do item pendentes antes
+    await flushPendingItemInfo();
+
+    setConfirmingMap(true);
+    const updated = await confirmarMapeamentoForcado(selectedSku.sku, operatorName);
+    if (updated) {
+      const newSkus = [...skus];
+      newSkus[selectedSkuIndex] = updated;
+      setSkus(newSkus);
+      setStats(await getStatsTp());
+    }
+    setConfirmingMap(false);
   };
 
   // Limpar tomadas de um sub-processo
@@ -821,6 +916,60 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
               );
             })}
           </div>
+
+          {/* Botão Confirmar Mapeamento (Final do Item) */}
+          {selectedSku && (
+            <div className="mt-4 bg-gradient-to-r from-slate-900/80 to-slate-800/60 border border-slate-700/60 rounded-3xl p-5 space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+                  style={{
+                    background: selectedSku.status === 'mapeado'
+                      ? 'rgba(16,185,129,0.15)'
+                      : 'rgba(251,146,60,0.15)'
+                  }}
+                >
+                  <CheckCircle2
+                    size={20}
+                    style={{
+                      color: selectedSku.status === 'mapeado' ? '#10b981' : '#fb923c'
+                    }}
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-black text-sm md:text-base text-white tracking-tight leading-tight">
+                    {selectedSku.status === 'mapeado'
+                      ? 'Mapeamento Concluído ✓'
+                      : 'Item com Processos Incompletos?'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5 font-medium leading-relaxed">
+                    {selectedSku.status === 'mapeado'
+                      ? 'Este SKU já está registrado como mapeado. Você pode continuar adicionando tomadas que o status será mantido.'
+                      : 'Caso nem todos os 6 subprocessos se aplicam a este item (processo pulado), confirme manualmente o mapeamento para marcar como concluído.'}
+                  </p>
+                </div>
+                {itemInfoIsDirty() && (
+                  <div className="px-2 py-1 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-400 text-[10px] font-bold shrink-0">
+                    ⚠ Pend.
+                  </div>
+                )}
+              </div>
+
+              {selectedSku.status !== 'mapeado' && (
+                <button
+                  onClick={handleConfirmarMapeamento}
+                  disabled={confirmingMap}
+                  className="w-full py-4 rounded-2xl font-black text-sm md:text-base flex items-center justify-center gap-2 transition-all shadow-xl active:scale-[0.98] disabled:opacity-60 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950"
+                >
+                  {confirmingMap ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4" />
+                  )}
+                  Confirmar Mapeamento
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
       </div>
