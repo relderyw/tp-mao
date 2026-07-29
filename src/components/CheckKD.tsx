@@ -6,7 +6,7 @@ import {
   ChevronDown, ChevronUp, Boxes, QrCode, Keyboard, Camera,
   MapPin, Filter, Layers, Building2, SwitchCamera, Lightbulb, ZoomIn, Minus, Plus
 } from 'lucide-react';
-import { Html5Qrcode } from 'html5-qrcode';
+import jsQR from 'jsqr';
 import {
   getItensByChave, getResumoLocacoes, SaldoEstoque, SkuTp,
   LocacaoResumo, LocacaoItem
@@ -639,7 +639,6 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
   const kdPollingRef = useRef<number | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -771,8 +770,8 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
   useEffect(() => { torchRef.current = torchOn; aplicarCameraConstraints(); }, [torchOn]);
   useEffect(() => { zoomRef.current = zoomLevel; aplicarCameraConstraints(); }, [zoomLevel]);
 
-  // Controlar câmera com getUserMedia NATIVO + Html5Qrcode apenas como decodificador
-  // NÃO usamos mais html5Qrcode.start() / .stop() — evita todos os erros de state machine.
+  // Controlar câmera 100% NATIVA (getUserMedia) + decodificação QR pura via jsQR
+  // NÃO há state machine, NÃO há lifecycle de scanner — sem erros de transição.
   useEffect(() => {
     let isMounted = true;
     const sessionId = ++cameraSessionRef.current;
@@ -790,15 +789,21 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
         const stream = mediaStreamRef.current;
         if (stream) {
           stream.getTracks().forEach(t => {
-            try { t.stop(); } catch {}
+            try {
+              if (typeof (t as any).applyConstraints === 'function') {
+                try { (t as any).applyConstraints({ advanced: [{ torch: false }] }); } catch {}
+              }
+              t.stop();
+            } catch {}
           });
         }
       } finally {
         mediaStreamRef.current = null;
         if (videoRef.current) {
           try {
+            videoRef.current.pause();
             videoRef.current.srcObject = null;
-            videoRef.current.load();
+            try { videoRef.current.load(); } catch {}
           } catch {}
         }
       }
@@ -809,9 +814,6 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
       isStoppingRef.current = true;
       try {
         cleanupStream();
-        if (scannerRef.current) {
-          scannerRef.current = null;
-        }
       } finally {
         isStoppingRef.current = false;
         if (isMounted) {
@@ -822,7 +824,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
       }
     }
 
-    async function tentarDecodificarFrame(): Promise<string | null> {
+    function tentarDecodificarFrame(): string | null {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       if (!video || !canvas || !video.videoWidth || !video.videoHeight) return null;
@@ -835,13 +837,11 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
         canvas.height = h;
         ctx.drawImage(video, 0, 0, w, h);
 
-        const qrDetector = scannerRef.current;
-        if (!qrDetector) return null;
-
         const imageData = ctx.getImageData(0, 0, w, h);
-        const result = await (qrDetector as any).scanCanvas(imageData, w, h);
-        if (result && typeof result === 'string' && result.trim()) return result;
-        if (result && typeof result === 'object' && (result as any).data) return String((result as any).data);
+        const decoded = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: 'attemptBoth',
+        });
+        if (decoded && decoded.data && decoded.data.trim()) return decoded.data.trim();
         return null;
       } catch {
         return null;
@@ -875,29 +875,23 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
           await stopTudo();
           if (!isMounted || sessionId !== cameraSessionRef.current) return;
 
-          // Cria decodificador Html5Qrcode (NÃO chama .start() — só usa como decodificador)
+          // Prepara canvas (invisível) para decodificação via jsQR
           try {
-            const fakeEl = document.getElementById("qr-reader") as any;
-            if (fakeEl && !fakeEl.querySelector('canvas.tp-decode-canvas')) {
+            const container = document.getElementById("qr-reader");
+            if (container && !container.querySelector('canvas.tp-decode-canvas')) {
               const cvs = document.createElement('canvas');
               cvs.className = 'tp-decode-canvas';
               cvs.style.width = '0';
               cvs.style.height = '0';
               cvs.style.position = 'absolute';
+              cvs.style.top = '0';
+              cvs.style.left = '0';
               cvs.style.opacity = '0';
               cvs.style.pointerEvents = 'none';
-              fakeEl.appendChild(cvs);
+              container.appendChild(cvs);
             }
-            const decoderEl = document.querySelector('#qr-reader .tp-decode-canvas') as HTMLCanvasElement | null;
-            if (decoderEl) {
-              canvasRef.current = decoderEl;
-              if (!scannerRef.current) {
-                scannerRef.current = new Html5Qrcode("qr-reader", {
-                  verbose: false,
-                  useBarCodeDetectorIfSupported: true,
-                });
-              }
-            }
+            const decoderEl = document.querySelector<HTMLCanvasElement>('#qr-reader .tp-decode-canvas');
+            if (decoderEl) canvasRef.current = decoderEl;
           } catch {}
 
           const facing = facingModeRef.current;
@@ -931,22 +925,23 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
           }
           mediaStreamRef.current = stream;
 
-          // Garante que o vídeo existe no DOM (sem depender do html5Qrcode criar)
-          const container = document.getElementById("qr-reader");
+          // Garante que o vídeo existe no DOM (criamos nós mesmos)
+          const containerEl = document.getElementById("qr-reader");
           let videoEl = videoRef.current;
-          if (container) {
-            let v = container.querySelector<HTMLVideoElement>('video.tp-native-video');
+          if (containerEl) {
+            let v = containerEl.querySelector<HTMLVideoElement>('video.tp-native-video');
             if (!v) {
               v = document.createElement('video');
               v.className = 'tp-native-video';
               v.setAttribute('playsinline', 'true');
               v.setAttribute('autoplay', 'true');
               v.setAttribute('muted', 'true');
+              v.setAttribute('playsInline', 'true');
               v.style.width = '100%';
               v.style.height = '100%';
               v.style.objectFit = 'cover';
               v.style.display = 'block';
-              container.prepend(v);
+              containerEl.prepend(v);
             }
             videoEl = v;
             videoRef.current = v;
@@ -969,15 +964,19 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
           setCameraError(null);
           aplicarCameraConstraints();
 
-          // Inicia loop de decodificação manual (a cada ~60ms = ~16fps, sem sobrecarregar)
+          // Loop de decodificação: a cada 50ms (20fps) — decodifica QR nativamente
           cleanupScanLoop();
-          scanLoopRef.current = window.setInterval(async () => {
+          let quadro = 0;
+          scanLoopRef.current = window.setInterval(() => {
             if (!isMounted || sessionId !== cameraSessionRef.current) return;
-            const chave = await tentarDecodificarFrame();
+            quadro++;
+            // Alterna alguns frames sem ocupar a thread principal
+            if (quadro % 2 === 0) return;
+            const chave = tentarDecodificarFrame();
             if (chave) {
               void onChaveDetectada(chave);
             }
-          }, 60);
+          }, 50);
 
         } catch (err: any) {
           if (isMounted && sessionId === cameraSessionRef.current) {
@@ -990,7 +989,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
         }
       };
 
-      start();
+      void start();
 
       return () => {
         isMounted = false;
