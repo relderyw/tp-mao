@@ -736,20 +736,24 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
     };
   }, [mainTab, chaveAtual, itens != null]);
 
-  // Helper: aplica lanterna (torch) e zoom na track de vídeo ativa
+  // Helper: aplica resolução, lanterna (torch) e zoom na track de vídeo ativa
   const aplicarCameraConstraints = async (novosFacingMode?: 'environment' | 'user') => {
-    const facing = novosFacingMode ?? facingModeRef.current;
     try {
       if (scannerRef.current) {
         try {
           const run = (scannerRef.current as any).isScanning;
           if (run) {
-            // Aplica configurações avançadas diretamente na track de vídeo do scanner
             const videoEl = document.querySelector<HTMLVideoElement>("#qr-reader video");
             if (videoEl && videoEl.srcObject && (videoEl.srcObject as MediaStream).getVideoTracks().length > 0) {
               const track = (videoEl.srcObject as MediaStream).getVideoTracks()[0];
               const caps = track.getCapabilities ? (track as any).getCapabilities() : {};
               const apply: any = {};
+              if (caps.width) {
+                try { apply.width = { ideal: 1280 }; } catch {}
+              }
+              if (caps.height) {
+                try { apply.height = { ideal: 720 }; } catch {}
+              }
               if (caps.torch && torchRef.current !== undefined) {
                 try { apply.advanced = [...(apply.advanced || []), { torch: torchRef.current }]; } catch {}
               }
