@@ -640,9 +640,12 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
 
   const inputRef = useRef<HTMLInputElement>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const scanLoopRef = useRef<number | null>(null);
   const isStoppingRef = useRef(false);
   const isStartingRef = useRef(false);
-  const scannerBusyRef = useRef(false);
   const preflightFailedRef = useRef(false);
   const cameraSessionRef = useRef(0);
   const lastDecodedRef = useRef<string | null>(null);
@@ -737,98 +740,80 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
   }, [mainTab, chaveAtual, itens != null]);
 
   // Helper: aplica resolução, lanterna (torch) e zoom na track de vídeo ativa
-  const aplicarCameraConstraints = async (novosFacingMode?: 'environment' | 'user') => {
+  const aplicarCameraConstraints = useCallback(async () => {
     try {
-      if (scannerRef.current) {
-        try {
-          const run = (scannerRef.current as any).isScanning;
-          if (run) {
-            const videoEl = document.querySelector<HTMLVideoElement>("#qr-reader video");
-            if (videoEl && videoEl.srcObject && (videoEl.srcObject as MediaStream).getVideoTracks().length > 0) {
-              const track = (videoEl.srcObject as MediaStream).getVideoTracks()[0];
-              const caps = track.getCapabilities ? (track as any).getCapabilities() : {};
-              const apply: any = {};
-              if (caps.width) {
-                try { apply.width = { ideal: 1280 }; } catch {}
-              }
-              if (caps.height) {
-                try { apply.height = { ideal: 720 }; } catch {}
-              }
-              if (caps.torch && torchRef.current !== undefined) {
-                try { apply.advanced = [...(apply.advanced || []), { torch: torchRef.current }]; } catch {}
-              }
-              if (caps.zoom && zoomRef.current && zoomRef.current >= 1) {
-                try { apply.advanced = [...(apply.advanced || []), { zoom: zoomRef.current }]; } catch {}
-              }
-              if (Object.keys(apply).length > 0) {
-                try { await (track as any).applyConstraints(apply); } catch {}
-              }
-            }
-          }
-        } catch {}
+      const stream = mediaStreamRef.current;
+      if (!stream) return;
+      const tracks = stream.getVideoTracks();
+      if (!tracks.length) return;
+      const track = tracks[0];
+      const caps = (track as any).getCapabilities ? (track as any).getCapabilities() : {};
+      const apply: any = {};
+      if (caps.width) {
+        try { apply.width = { ideal: 1280 }; } catch {}
+      }
+      if (caps.height) {
+        try { apply.height = { ideal: 720 }; } catch {}
+      }
+      if (caps.torch && torchRef.current !== undefined) {
+        try { apply.advanced = [...(apply.advanced || []), { torch: torchRef.current }]; } catch {}
+      }
+      if (caps.zoom && zoomRef.current && zoomRef.current >= 1) {
+        try { apply.advanced = [...(apply.advanced || []), { zoom: zoomRef.current }]; } catch {}
+      }
+      if (Object.keys(apply).length > 0) {
+        try { await (track as any).applyConstraints(apply); } catch {}
       }
     } catch {}
-  };
+  }, []);
 
   // Sincroniza refs com estados de torch/zoom e aplica
   useEffect(() => { torchRef.current = torchOn; aplicarCameraConstraints(); }, [torchOn]);
   useEffect(() => { zoomRef.current = zoomLevel; aplicarCameraConstraints(); }, [zoomLevel]);
 
-  // Controlar câmera com Html5Qrcode — permissão já concedida no clique (ativarModoCamera)
+  // Controlar câmera com getUserMedia NATIVO + Html5Qrcode apenas como decodificador
+  // NÃO usamos mais html5Qrcode.start() / .stop() — evita todos os erros de state machine.
   useEffect(() => {
     let isMounted = true;
     const sessionId = ++cameraSessionRef.current;
 
-    const isTransitionError = (err: any): boolean => {
-      const msg = String(err?.message || err || '').toLowerCase();
-      return msg.includes('cannot transition') || msg.includes('already under transition') || msg.includes('already started');
-    };
-
-    const waitFor = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
-
-    async function softStopInstance(instance: Html5Qrcode | null): Promise<void> {
-      if (!instance) return;
-      for (let t = 0; t < 3; t++) {
-        try {
-          let running = false;
-          try { running = await instance.isScanning; } catch {}
-          if (running) {
-            try { await instance.stop(); } catch (e: any) {
-              if (!isTransitionError(e)) break;
-              await waitFor(200);
-              continue;
-            }
-          }
-          break;
-        } catch (e: any) {
-          if (!isTransitionError(e)) break;
-          await waitFor(200);
-        }
+    function cleanupScanLoop(): void {
+      if (scanLoopRef.current !== null) {
+        window.clearInterval(scanLoopRef.current);
+        scanLoopRef.current = null;
       }
-      try { await instance.clear(); } catch {}
     }
 
-    async function stopScannerCompletamente(): Promise<void> {
-      if (!scannerRef.current) return;
-      if (isStoppingRef.current) return;
-      if (scannerBusyRef.current) {
-        let attempts = 0;
-        while (scannerBusyRef.current && attempts < 20) {
-          await waitFor(50);
-          attempts++;
-        }
-      }
-      isStoppingRef.current = true;
-      scannerBusyRef.current = true;
+    function cleanupStream(): void {
       try {
-        const instance = scannerRef.current;
-        if (instance) {
-          await softStopInstance(instance);
+        cleanupScanLoop();
+        const stream = mediaStreamRef.current;
+        if (stream) {
+          stream.getTracks().forEach(t => {
+            try { t.stop(); } catch {}
+          });
         }
       } finally {
-        scannerRef.current = null;
+        mediaStreamRef.current = null;
+        if (videoRef.current) {
+          try {
+            videoRef.current.srcObject = null;
+            videoRef.current.load();
+          } catch {}
+        }
+      }
+    }
+
+    async function stopTudo(): Promise<void> {
+      if (isStoppingRef.current) return;
+      isStoppingRef.current = true;
+      try {
+        cleanupStream();
+        if (scannerRef.current) {
+          scannerRef.current = null;
+        }
+      } finally {
         isStoppingRef.current = false;
-        scannerBusyRef.current = false;
         if (isMounted) {
           setCameraActive(false);
           setTorchOn(false); torchRef.current = false;
@@ -837,138 +822,163 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
       }
     }
 
-    const scanConfig = (boxSize: number) => ({
-      fps: 24,
-      qrbox: { width: boxSize, height: boxSize },
-      aspectRatio: 1.333333,
-      disableFlip: false,
-      formatsToSupport: [
-        (Html5Qrcode as any).SupportedFormats?.QR_CODE,
-        (Html5Qrcode as any).SupportedFormats?.CODE_128,
-        (Html5Qrcode as any).SupportedFormats?.EAN_13,
-      ].filter(Boolean),
-    });
+    async function tentarDecodificarFrame(): Promise<string | null> {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || !canvas || !video.videoWidth || !video.videoHeight) return null;
+      try {
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return null;
+        canvas.width = w;
+        canvas.height = h;
+        ctx.drawImage(video, 0, 0, w, h);
 
-    const onScanSuccess = async (decodedText: string) => {
-      if (!isMounted || sessionId !== cameraSessionRef.current) return;
-      if (lastDecodedRef.current === decodedText) return;
-      lastDecodedRef.current = decodedText;
+        const qrDetector = scannerRef.current;
+        if (!qrDetector) return null;
 
-      try { if (navigator.vibrate) navigator.vibrate(40); } catch {}
-
-      await stopScannerCompletamente();
-      if (!isMounted) return;
-
-      setInputValue(decodedText);
-      setMode('qr');
-      buscarRef.current(decodedText);
-      setTimeout(() => { lastDecodedRef.current = null; }, 2500);
-    };
-
-    async function iniciarScannerComConstraints(
-      html5Qrcode: Html5Qrcode,
-      videoConstraints: MediaTrackConstraints,
-      boxSize: number
-    ): Promise<void> {
-      let lastErr: any = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          await html5Qrcode.start(
-            { videoConstraints } as any,
-            scanConfig(boxSize) as any,
-            onScanSuccess,
-            () => {}
-          );
-          return;
-        } catch (err: any) {
-          lastErr = err;
-          if (isTransitionError(err)) {
-            await softStopInstance(html5Qrcode);
-            await waitFor(300 + attempt * 200);
-            continue;
-          }
-          throw err;
-        }
+        const imageData = ctx.getImageData(0, 0, w, h);
+        const result = await (qrDetector as any).scanCanvas(imageData, w, h);
+        if (result && typeof result === 'string' && result.trim()) return result;
+        if (result && typeof result === 'object' && (result as any).data) return String((result as any).data);
+        return null;
+      } catch {
+        return null;
       }
-      throw lastErr;
     }
 
-    function criarScanner(): Html5Qrcode {
-      return new Html5Qrcode("qr-reader", {
-        verbose: false,
-        useBarCodeDetectorIfSupported: true
-      });
+    async function onChaveDetectada(chave: string): Promise<void> {
+      if (!isMounted || sessionId !== cameraSessionRef.current) return;
+      if (lastDecodedRef.current === chave) return;
+      lastDecodedRef.current = chave;
+
+      try { if (navigator.vibrate) navigator.vibrate(40); } catch {}
+      await stopTudo();
+      if (!isMounted) return;
+
+      setInputValue(chave);
+      setMode('qr');
+      buscarRef.current(chave);
+      setTimeout(() => { lastDecodedRef.current = null; }, 2500);
     }
 
     if (mainTab === 'kd' && mode === 'camera') {
-      const startScanner = async () => {
+      const start = async () => {
         if (isStartingRef.current) return;
-        if (scannerBusyRef.current) return;
-
         if (preflightFailedRef.current) {
           preflightFailedRef.current = false;
           return;
         }
-
         isStartingRef.current = true;
-        scannerBusyRef.current = true;
-
         try {
-          await stopScannerCompletamente();
-          await waitFor(400);
-          if (!isMounted || sessionId !== cameraSessionRef.current) {
-            return;
-          }
-
-          let tries = 0;
-          while (!document.getElementById("qr-reader") && tries < 40) {
-            await waitFor(50);
-            tries++;
-          }
+          await stopTudo();
           if (!isMounted || sessionId !== cameraSessionRef.current) return;
-          if (!document.getElementById("qr-reader")) {
-            throw new Error("Elemento do leitor de QR não encontrado no DOM.");
-          }
 
-          const container = document.getElementById("qr-reader")?.parentElement?.clientWidth ?? 320;
-          const boxSize = Math.max(220, Math.min(container * 0.82, 380));
-          const facing = facingModeRef.current;
-
-          const configAvancada: MediaTrackConstraints = {
-            facingMode: facing,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          };
-          const configSimples: MediaTrackConstraints = { facingMode: facing };
-
-          let started = false;
-          let html5Qrcode = criarScanner();
-          scannerRef.current = html5Qrcode;
-
+          // Cria decodificador Html5Qrcode (NÃO chama .start() — só usa como decodificador)
           try {
-            await iniciarScannerComConstraints(html5Qrcode, configAvancada, boxSize);
-            started = true;
-          } catch (errAvancado) {
-            console.warn('Câmera: fallback para constraints simples', errAvancado);
-            await softStopInstance(html5Qrcode);
-            scannerRef.current = null;
-            await waitFor(300);
-            if (!isMounted || sessionId !== cameraSessionRef.current) return;
+            const fakeEl = document.getElementById("qr-reader") as any;
+            if (fakeEl && !fakeEl.querySelector('canvas.tp-decode-canvas')) {
+              const cvs = document.createElement('canvas');
+              cvs.className = 'tp-decode-canvas';
+              cvs.style.width = '0';
+              cvs.style.height = '0';
+              cvs.style.position = 'absolute';
+              cvs.style.opacity = '0';
+              cvs.style.pointerEvents = 'none';
+              fakeEl.appendChild(cvs);
+            }
+            const decoderEl = document.querySelector('#qr-reader .tp-decode-canvas') as HTMLCanvasElement | null;
+            if (decoderEl) {
+              canvasRef.current = decoderEl;
+              if (!scannerRef.current) {
+                scannerRef.current = new Html5Qrcode("qr-reader", {
+                  verbose: false,
+                  useBarCodeDetectorIfSupported: true,
+                });
+              }
+            }
+          } catch {}
 
-            html5Qrcode = criarScanner();
-            scannerRef.current = html5Qrcode;
-            await iniciarScannerComConstraints(html5Qrcode, configSimples, boxSize);
-            started = true;
-          }
+          const facing = facingModeRef.current;
+          const constraints: MediaStreamConstraints = {
+            audio: false,
+            video: {
+              facingMode: facing,
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+          };
 
-          if (started) {
-            await waitFor(400);
-            if (isMounted && sessionId === cameraSessionRef.current) {
-              aplicarCameraConstraints();
-              setCameraActive(true);
-              setCameraError(null);
+          let stream: MediaStream | null = null;
+          try {
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+          } catch (err1) {
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: facing } });
+            } catch (err2) {
+              if (isMounted && sessionId === cameraSessionRef.current) {
+                setCameraError(mensagemErroCamera(err2));
+                setCameraActive(false);
+              }
+              return;
             }
           }
+
+          if (!isMounted || sessionId !== cameraSessionRef.current) {
+            try { stream.getTracks().forEach(t => t.stop()); } catch {}
+            return;
+          }
+          mediaStreamRef.current = stream;
+
+          // Garante que o vídeo existe no DOM (sem depender do html5Qrcode criar)
+          const container = document.getElementById("qr-reader");
+          let videoEl = videoRef.current;
+          if (container) {
+            let v = container.querySelector<HTMLVideoElement>('video.tp-native-video');
+            if (!v) {
+              v = document.createElement('video');
+              v.className = 'tp-native-video';
+              v.setAttribute('playsinline', 'true');
+              v.setAttribute('autoplay', 'true');
+              v.setAttribute('muted', 'true');
+              v.style.width = '100%';
+              v.style.height = '100%';
+              v.style.objectFit = 'cover';
+              v.style.display = 'block';
+              container.prepend(v);
+            }
+            videoEl = v;
+            videoRef.current = v;
+          }
+
+          if (videoEl && stream) {
+            try {
+              videoEl.srcObject = stream;
+              await videoEl.play();
+            } catch (playErr) {
+              if (isMounted && sessionId === cameraSessionRef.current) {
+                setCameraError(mensagemErroCamera(playErr));
+              }
+              return;
+            }
+          }
+
+          if (!isMounted || sessionId !== cameraSessionRef.current) return;
+          setCameraActive(true);
+          setCameraError(null);
+          aplicarCameraConstraints();
+
+          // Inicia loop de decodificação manual (a cada ~60ms = ~16fps, sem sobrecarregar)
+          cleanupScanLoop();
+          scanLoopRef.current = window.setInterval(async () => {
+            if (!isMounted || sessionId !== cameraSessionRef.current) return;
+            const chave = await tentarDecodificarFrame();
+            if (chave) {
+              void onChaveDetectada(chave);
+            }
+          }, 60);
+
         } catch (err: any) {
           if (isMounted && sessionId === cameraSessionRef.current) {
             console.error("Erro na câmera:", err);
@@ -977,26 +987,25 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
           }
         } finally {
           isStartingRef.current = false;
-          scannerBusyRef.current = false;
         }
       };
 
-      startScanner();
+      start();
 
       return () => {
         isMounted = false;
         cameraSessionRef.current++;
-        stopScannerCompletamente();
+        void stopTudo();
       };
     }
 
     setCameraActive(false);
-    stopScannerCompletamente();
+    void stopTudo();
     return () => {
       isMounted = false;
       cameraSessionRef.current++;
     };
-  }, [mainTab, mode, cameraRestartKey]);
+  }, [mainTab, mode, cameraRestartKey, aplicarCameraConstraints]);
 
   // Auto-foco e auto-recarregamento ao voltar para a aba
   useEffect(() => {
