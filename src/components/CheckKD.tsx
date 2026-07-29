@@ -639,6 +639,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const isStoppingRef = useRef(false);
   const isStartingRef = useRef(false);
+  const scannerBusyRef = useRef(false);
   const cameraSessionRef = useRef(0);
   const lastDecodedRef = useRef<string | null>(null);
   const facingModeRef = useRef<'environment' | 'user'>('environment');
@@ -768,23 +769,51 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
     let isMounted = true;
     const sessionId = ++cameraSessionRef.current;
 
+    const isTransitionError = (err: any): boolean => {
+      const msg = String(err?.message || err || '').toLowerCase();
+      return msg.includes('cannot transition') || msg.includes('already under transition') || msg.includes('already started');
+    };
+
+    const waitFor = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
+
     async function stopScannerCompletamente(): Promise<void> {
       if (!scannerRef.current) return;
       if (isStoppingRef.current) return;
+      if (scannerBusyRef.current) {
+        let attempts = 0;
+        while (scannerBusyRef.current && attempts < 20) {
+          await waitFor(50);
+          attempts++;
+        }
+      }
       isStoppingRef.current = true;
+      scannerBusyRef.current = true;
       try {
-        try {
-          const isRunning = await scannerRef.current.isScanning;
-          if (isRunning) {
-            try { await (scannerRef.current as any).pause(); } catch {}
+        const instance = scannerRef.current;
+        if (!instance) return;
+        let tries = 0;
+        while (tries < 3) {
+          try {
+            let running = false;
+            try { running = await instance.isScanning; } catch {}
+            if (running) {
+              try { await instance.stop(); } catch (e: any) {
+                if (!isTransitionError(e)) throw e;
+                await waitFor(200);
+                continue;
+              }
+            }
+            break;
+          } catch (e: any) {
+            if (!isTransitionError(e)) { tries++; await waitFor(150); }
+            else { tries++; await waitFor(200); }
           }
-        } catch {}
-        try { await scannerRef.current.stop(); } catch {}
-        try { await scannerRef.current.clear(); } catch {}
+        }
+        try { await instance.clear(); } catch {}
       } finally {
         scannerRef.current = null;
         isStoppingRef.current = false;
-        isStartingRef.current = false;
+        scannerBusyRef.current = false;
         if (isMounted) {
           setCameraActive(false);
           setTorchOn(false); torchRef.current = false;
@@ -826,31 +855,45 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
       videoConstraints: MediaTrackConstraints,
       boxSize: number
     ): Promise<void> {
-      await html5Qrcode.start(
-        { videoConstraints } as any,
-        scanConfig(boxSize) as any,
-        onScanSuccess,
-        () => {}
-      );
+      let lastErr: any = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await html5Qrcode.start(
+            { videoConstraints } as any,
+            scanConfig(boxSize) as any,
+            onScanSuccess,
+            () => {}
+          );
+          return;
+        } catch (err: any) {
+          lastErr = err;
+          if (isTransitionError(err)) {
+            await waitFor(300 + attempt * 200);
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw lastErr;
     }
 
     if (mainTab === 'kd' && mode === 'camera') {
       const startScanner = async () => {
         if (isStartingRef.current) return;
+        if (scannerBusyRef.current) return;
         isStartingRef.current = true;
-
-        await stopScannerCompletamente();
-        // Aguarda liberação da câmera (React StrictMode / troca rápida de aba)
-        await new Promise(r => setTimeout(r, 150));
-        if (!isMounted || sessionId !== cameraSessionRef.current) {
-          isStartingRef.current = false;
-          return;
-        }
+        scannerBusyRef.current = true;
 
         try {
+          await stopScannerCompletamente();
+          await waitFor(400);
+          if (!isMounted || sessionId !== cameraSessionRef.current) {
+            return;
+          }
+
           let tries = 0;
-          while (!document.getElementById("qr-reader") && tries < 30) {
-            await new Promise(r => setTimeout(r, 50));
+          while (!document.getElementById("qr-reader") && tries < 40) {
+            await waitFor(50);
             tries++;
           }
           if (!isMounted || sessionId !== cameraSessionRef.current) return;
@@ -875,20 +918,25 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
           };
           const configSimples: MediaTrackConstraints = { facingMode: facing };
 
+          let started = false;
           try {
             await iniciarScannerComConstraints(html5Qrcode, configAvancada, boxSize);
+            started = true;
           } catch (errAvancado) {
             console.warn('Câmera: fallback para constraints simples', errAvancado);
-            try { await html5Qrcode.stop(); } catch {}
-            try { await html5Qrcode.clear(); } catch {}
+            await waitFor(200);
+            if (!isMounted || sessionId !== cameraSessionRef.current) return;
             await iniciarScannerComConstraints(html5Qrcode, configSimples, boxSize);
+            started = true;
           }
 
-          await new Promise(r => setTimeout(r, 300));
-          if (isMounted && sessionId === cameraSessionRef.current) {
-            aplicarCameraConstraints();
-            setCameraActive(true);
-            setCameraError(null);
+          if (started) {
+            await waitFor(400);
+            if (isMounted && sessionId === cameraSessionRef.current) {
+              aplicarCameraConstraints();
+              setCameraActive(true);
+              setCameraError(null);
+            }
           }
         } catch (err: any) {
           if (isMounted && sessionId === cameraSessionRef.current) {
@@ -898,6 +946,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
           }
         } finally {
           isStartingRef.current = false;
+          scannerBusyRef.current = false;
         }
       };
 
@@ -1022,7 +1071,19 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
             {/* Toggle 3 Modos: Câmera | Leitor USB | Digitar */}
             <div className="flex bg-slate-100 rounded-xl p-1 gap-1 mb-4 overflow-x-auto">
               <button
-                onClick={() => { if (mode !== 'camera') void ativarModoCamera(); }}
+                onClick={() => {
+                  if (mode === 'camera') {
+                    if (cameraError || !cameraActive) {
+                      setMode('qr');
+                      setTimeout(() => {
+                        setCameraRestartKey(k => k + 1);
+                        void ativarModoCamera();
+                      }, 50);
+                    }
+                  } else {
+                    void ativarModoCamera();
+                  }
+                }}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
                   mode === 'camera' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900'
                 }`}
@@ -1081,7 +1142,13 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
                     <span className="text-xs font-bold max-w-sm">{cameraError}</span>
                     <div className="flex flex-wrap justify-center gap-2 mt-2">
                       <button
-                        onClick={() => void ativarModoCamera()}
+                        onClick={() => {
+                          setMode('qr');
+                          setTimeout(() => {
+                            setCameraRestartKey(k => k + 1);
+                            void ativarModoCamera();
+                          }, 50);
+                        }}
                         className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-500 font-bold"
                       >
                         Tentar novamente
