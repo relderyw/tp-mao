@@ -169,6 +169,10 @@ export interface DashboardData {
   stats: StatsTp;
   analistas: AnalystStat[];
   modelos: ModelStat[];
+  /** Rótulo do período selecionado pelo usuário (null = sem filtro) */
+  periodLabel: string | null;
+  /** Número de itens mapeados/em andamento DENTRO do período (exclui filtro) */
+  periodTotalItems: number;
 }
 
 // ── Funções de acesso ──────────────────────────────────────────────
@@ -308,7 +312,30 @@ export async function getStatsTp(): Promise<StatsTp> {
 }
 
 /** Busca analítica completa para o Dashboard (Produtividade por analista e Resumo por modelo) */
-export async function getDashboardAnalytics(): Promise<DashboardData> {
+export interface DashboardDateRange {
+  /** 'YYYY-MM-DD' no fuso LOCAL (Manaus). Se vazio, não limita início. */
+  startDate?: string;
+  /** 'YYYY-MM-DD' no fuso LOCAL (Manaus). Se vazio, não limita fim. */
+  endDate?: string;
+}
+
+export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Promise<DashboardData> {
+  // Converte datas do filtro (fuso LOCAL) → limites de timestamp em UTC
+  // que usaremos p/ decidir se um item entra na contagem de produtividade do período.
+  const gteTs = dateRange?.startDate ? new Date(localStartOfDayToUtcIso(dateRange.startDate)).getTime() : -Infinity;
+  const lteTs = dateRange?.endDate   ? new Date(localEndOfDayToUtcIso(dateRange.endDate)).getTime()   :  Infinity;
+  const hasFilter = (dateRange?.startDate != null && dateRange.startDate !== '') ||
+                    (dateRange?.endDate   != null && dateRange.endDate   !== '');
+
+  // Rótulo que vai no card do analista no lugar de "Hoje" quando filtro ativo
+  const periodLabel = (() => {
+    if (!hasFilter) return null;
+    const s = dateRange?.startDate;
+    const e = dateRange?.endDate;
+    if (s && e && s === e) return 'No Dia';
+    return 'No Período';
+  })();
+
   // Supabase PostgREST limita a 1.000 linhas por requisição por padrão.
   // Fazemos paginação em lote de 1.000 para carregar TODOS os 18.000+ SKUs!
   let allData: any[] = [];
@@ -340,10 +367,16 @@ export async function getDashboardAnalytics(): Promise<DashboardData> {
     return {
       stats: { total: 0, concluidos: 0, andamento: 0, pendentes: 0 },
       analistas: [],
-      modelos: []
+      modelos: [],
+      periodLabel,
+      periodTotalItems: 0
     };
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // KPI Cards do topo (TOTAL GERAL DA ESTRUTURA — ignoram filtro
+  // de data, pois representam o "estado atual do trabalho")
+  // ═══════════════════════════════════════════════════════════════
   const total = data.length;
   const concluidos = data.filter(d => d.status === 'mapeado').length;
   const andamento = data.filter(d => d.status === 'andamento').length;
@@ -353,11 +386,23 @@ export async function getDashboardAnalytics(): Promise<DashboardData> {
   // ex: 22:00 do dia 27 local = 02:00 dia 28 UTC — queremos "hoje" = dia 27
   const todayStr = localDateKey(new Date());
 
+  // Predicado: UM ITEM CONTA NA PRODUTIVIDADE DO PERÍODO?
+  // Sem filtro → sempre true (todo o histórico).
+  // Com filtro → requer updated_at (tempo em ms) DENTRO de [gteTs, lteTs].
+  const inPeriod = (item: any) => {
+    if (!hasFilter) return true;
+    if (!item.updated_at) return false;
+    const ts = new Date(item.updated_at).getTime();
+    return ts >= gteTs && ts <= lteTs;
+  };
+
   // 1. Agrupamento por Analista (responsavel)
   const analistasMap = new Map<string, { hoje: number; total: number; tempos: number[]; timestamps: number[] }>();
+  let periodTotalItems = 0;
 
   data.forEach(item => {
-    if (item.responsavel && item.status !== 'pendente') {
+    if (item.responsavel && item.status !== 'pendente' && inPeriod(item)) {
+      periodTotalItems += 1;
       const name = item.responsavel.trim();
       if (!analistasMap.has(name)) {
         analistasMap.set(name, { hoje: 0, total: 0, tempos: [], timestamps: [] });
@@ -421,9 +466,13 @@ export async function getDashboardAnalytics(): Promise<DashboardData> {
   }).sort((a, b) => b.total - a.total);
 
   // 2. Agrupamento por Modelo (modelo)
+  // Com filtro de data: considera SOMENTE os itens do PERÍODO filtrado
+  // (mostra modelos "ativos" em produtividade durante o período)
+  // Sem filtro: mostra TUDO (100% da estrutura atual)
   const modelosMap = new Map<string, { total: number; mapeados: number; andamento: number; pendentes: number }>();
 
   data.forEach(item => {
+    if (hasFilter && !inPeriod(item)) return;
     const mod = (item.modelo || 'Sem Modelo').trim().toUpperCase();
     if (!modelosMap.has(mod)) {
       modelosMap.set(mod, { total: 0, mapeados: 0, andamento: 0, pendentes: 0 });
@@ -447,7 +496,9 @@ export async function getDashboardAnalytics(): Promise<DashboardData> {
   return {
     stats: { total, concluidos, andamento, pendentes },
     analistas,
-    modelos
+    modelos,
+    periodLabel,
+    periodTotalItems
   };
 }
 

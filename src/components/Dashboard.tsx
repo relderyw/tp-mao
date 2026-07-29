@@ -2,22 +2,74 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Users, CheckCircle2, Clock, Activity, RefreshCw, Loader2,
-  TrendingUp, Boxes, Play, ArrowRight, Award, Calendar
+  TrendingUp, Boxes, Play, ArrowRight, Award, Calendar,
+  Filter, X
 } from 'lucide-react';
-import { getDashboardAnalytics, DashboardData } from '../lib/supabase';
+import { getDashboardAnalytics, DashboardData, DashboardDateRange, localDateKey } from '../lib/supabase';
+
+// ── Helpers de data rápidos para os atalhos (fuso LOCAL do navegador = Manaus)
+function addDays(d: Date, days: number): Date {
+  const n = new Date(d);
+  n.setDate(n.getDate() + days);
+  return n;
+}
+
+type PresetKey = 'all' | 'today' | 'yesterday' | '7d' | '30d';
+
+const PRESETS: { key: PresetKey; label: string }[] = [
+  { key: 'all',       label: 'Todo' },
+  { key: 'today',     label: 'Hoje' },
+  { key: 'yesterday', label: 'Ontem' },
+  { key: '7d',        label: '7 dias' },
+  { key: '30d',       label: '30 dias' },
+];
 
 export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => void }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<DashboardData>({
     stats: { total: 0, concluidos: 0, andamento: 0, pendentes: 0 },
     analistas: [],
-    modelos: []
+    modelos: [],
+    periodLabel: null,
+    periodTotalItems: 0,
   });
 
-  const loadData = async () => {
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate,   setEndDate]   = useState<string>('');
+  const [activePreset, setActivePreset] = useState<PresetKey>('all');
+
+  const applyPreset = (key: PresetKey) => {
+    setActivePreset(key);
+    const today = localDateKey(new Date());
+    switch (key) {
+      case 'all':
+        setStartDate(''); setEndDate('');
+        return;
+      case 'today':
+        setStartDate(today); setEndDate(today);
+        return;
+      case 'yesterday': {
+        const ys = localDateKey(addDays(new Date(), -1));
+        setStartDate(ys); setEndDate(ys);
+        return;
+      }
+      case '7d': {
+        const s = localDateKey(addDays(new Date(), -6));
+        setStartDate(s); setEndDate(today);
+        return;
+      }
+      case '30d': {
+        const s = localDateKey(addDays(new Date(), -29));
+        setStartDate(s); setEndDate(today);
+        return;
+      }
+    }
+  };
+
+  const loadData = async (range?: DashboardDateRange) => {
     setLoading(true);
     try {
-      const result = await getDashboardAnalytics();
+      const result = await getDashboardAnalytics(range);
       setData(result);
     } catch (err) {
       console.error('Erro ao carregar métricas:', err);
@@ -27,8 +79,13 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    const range: DashboardDateRange = {};
+    if (startDate) range.startDate = startDate;
+    if (endDate)   range.endDate   = endDate;
+    loadData(range);
+  }, [startDate, endDate]);
+
+  const clearFilter = () => applyPreset('all');
 
   const percentConcluido = data.stats.total > 0
     ? Number(((data.stats.concluidos / data.stats.total) * 100).toFixed(1))
@@ -43,27 +100,108 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
     );
   }
 
+  const hasFilter = !!startDate || !!endDate;
+  const fmtPtBr = (d: string) => {
+    if (!d) return '';
+    const [y, m, dd] = d.split('-');
+    return `${dd}/${m}/${y}`;
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
 
-      {/* ── Topo: Título + Botão Atualizar ── */}
-      <div className="flex justify-between items-center bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-        <div>
-          <h1 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
-            <Activity className="w-6 h-6 text-blue-600" />
-            Resumo Geral de Cronometragem
-          </h1>
-          <p className="text-xs text-slate-400 font-semibold mt-0.5">
-            Acompanhamento em tempo real da medição de T&amp;P por analista e por modelo
-          </p>
+      {/* ── Topo: Título + Filtro de Datas + Botão Atualizar ── */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-5">
+        <div className="flex justify-between items-center flex-wrap gap-3">
+          <div>
+            <h1 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+              <Activity className="w-6 h-6 text-blue-600" />
+              Resumo Geral de Cronometragem
+            </h1>
+            <p className="text-xs text-slate-400 font-semibold mt-0.5">
+              Acompanhamento em tempo real da medição de T&amp;P por analista e por modelo
+              {hasFilter && (
+                <span className="ml-2 inline-flex items-center gap-1 text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full font-bold border border-blue-100">
+                  <Filter className="w-3 h-3" />
+                  Período: {fmtPtBr(startDate) || '...'} a {fmtPtBr(endDate) || '...'}
+                  {data.periodTotalItems >= 0 && (
+                    <span className="text-[10px] font-black ml-1 bg-white border border-blue-100 px-1.5 py-0.5 rounded">
+                      {data.periodTotalItems} itens
+                    </span>
+                  )}
+                </span>
+              )}
+            </p>
+          </div>
+          <button
+            onClick={() => loadData({ startDate: startDate || undefined, endDate: endDate || undefined })}
+            className="p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl transition-all border border-slate-200 flex items-center gap-2 text-xs font-bold"
+          >
+            <RefreshCw className="w-4 h-4 text-slate-500" />
+            <span>Atualizar</span>
+          </button>
         </div>
-        <button
-          onClick={loadData}
-          className="p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl transition-all border border-slate-200 flex items-center gap-2 text-xs font-bold"
-        >
-          <RefreshCw className="w-4 h-4 text-slate-500" />
-          <span>Atualizar</span>
-        </button>
+
+        {/* Filtro de período: presets + inputs */}
+        <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-slate-100">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {PRESETS.map(p => (
+              <button
+                key={p.key}
+                onClick={() => applyPreset(p.key)}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider border transition-all ${
+                  activePreset === p.key
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                    : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50 hover:text-slate-700'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="h-7 w-px bg-slate-200 mx-0.5" />
+
+          <label className="flex flex-col gap-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+            Data Início
+            <div className="relative">
+              <Calendar className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="date"
+                value={startDate}
+                max={endDate || localDateKey(new Date())}
+                onChange={(e) => { setActivePreset('all'); setStartDate(e.target.value); }}
+                className="pl-8 pr-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-xs font-bold text-slate-700 w-[145px]"
+              />
+            </div>
+          </label>
+
+          <label className="flex flex-col gap-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+            Data Fim
+            <div className="relative">
+              <Calendar className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="date"
+                value={endDate}
+                min={startDate || ''}
+                max={localDateKey(new Date())}
+                onChange={(e) => { setActivePreset('all'); setEndDate(e.target.value); }}
+                className="pl-8 pr-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-xs font-bold text-slate-700 w-[145px]"
+              />
+            </div>
+          </label>
+
+          {hasFilter && (
+            <button
+              onClick={clearFilter}
+              className="px-2.5 py-1.5 rounded-lg border border-rose-100 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] font-black uppercase tracking-wider flex items-center gap-1 transition-all"
+              title="Limpar filtro de datas"
+            >
+              <X className="w-3.5 h-3.5" />
+              Limpar
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── KPI Cards do Topo ── */}
@@ -127,7 +265,11 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
             </div>
             <div>
               <h2 className="text-base font-black text-slate-800 tracking-tight">Produtividade por Analista</h2>
-              <p className="text-xs text-slate-400">Itens mapeados hoje e acumulado total por controlador de T&amp;P</p>
+              <p className="text-xs text-slate-400">
+                {hasFilter
+                  ? `Itens mapeados no período (${fmtPtBr(startDate)} a ${fmtPtBr(endDate)}) e itens feitos HOJE por controlador de T&P`
+                  : 'Itens mapeados hoje e acumulado total por controlador de T&P'}
+              </p>
             </div>
           </div>
         </div>
@@ -135,7 +277,9 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
         {data.analistas.length === 0 ? (
           <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl">
             <Award className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-            <p className="text-sm font-bold text-slate-500">Nenhum item mapeado registrado ainda</p>
+            <p className="text-sm font-bold text-slate-500">
+              {hasFilter ? 'Nenhum item registrado nesse período de datas' : 'Nenhum item mapeado registrado ainda'}
+            </p>
             <p className="text-xs text-slate-400">As medições feitas na tela de Mapeamento aparecerão agrupadas por analista aqui.</p>
           </div>
         ) : (
@@ -170,13 +314,15 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
                 </div>
 
                 {/* Métricas Principais */}
-                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/60">
+                <div className={`grid gap-2 pt-2 border-t border-slate-200/60 ${hasFilter ? 'grid-cols-2' : 'grid-cols-2'}`}>
                   <div className="bg-white p-2.5 rounded-xl text-center border border-slate-100">
                     <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Hoje</span>
                     <span className="text-base font-black text-emerald-600 font-mono">{an.hoje}</span>
                   </div>
-                  <div className="bg-white p-2.5 rounded-xl text-center border border-slate-100">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Total Mapeado</span>
+                  <div className="bg-white p-2.5 rounded-xl text-center border border-blue-100">
+                    <span className="text-[9px] font-black text-blue-500 uppercase tracking-wider block">
+                      {hasFilter ? 'No Período' : 'Total Mapeado'}
+                    </span>
                     <span className="text-base font-black text-blue-600 font-mono">{an.total}</span>
                   </div>
                 </div>
@@ -186,7 +332,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-slate-500 font-semibold flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5 text-blue-500" />
-                      Tempo Médio da Peça:
+                      {hasFilter ? 'Tempo Médio da Peça no Período:' : 'Tempo Médio da Peça:'}
                     </span>
                     <span className="font-black text-slate-800 font-mono">
                       {an.mediaTempo ? an.mediaTempo + 's' : '—'}
@@ -218,14 +364,20 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
             </div>
             <div>
               <h2 className="text-base font-black text-slate-800 tracking-tight">Resumo por Modelo de Motocicleta</h2>
-              <p className="text-xs text-slate-400">Status dos SKUs agrupados por modelo do galpão</p>
+              <p className="text-xs text-slate-400">
+                {hasFilter
+                  ? `Modelos com atividade no período de ${fmtPtBr(startDate)} a ${fmtPtBr(endDate)}`
+                  : 'Status dos SKUs agrupados por modelo do galpão'}
+              </p>
             </div>
           </div>
         </div>
 
         {data.modelos.length === 0 ? (
           <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl">
-            <p className="text-sm font-bold text-slate-500">Nenhum modelo cadastrado na base</p>
+            <p className="text-sm font-bold text-slate-500">
+              {hasFilter ? 'Nenhum modelo registrou atividade nesse período de datas' : 'Nenhum modelo cadastrado na base'}
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
