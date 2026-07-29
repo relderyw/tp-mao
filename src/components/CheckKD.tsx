@@ -31,6 +31,9 @@ function mensagemErroCamera(err: unknown): string {
   if (/secure context|https/i.test(msg)) {
     return 'A câmera só funciona em HTTPS ou localhost. Acesse o site por uma conexão segura.';
   }
+  if (/cannot transition|already under transition|already started/i.test(msg)) {
+    return 'A câmera ficou em estado inconsistente. Clique em "Tentar novamente" para reiniciar o leitor.';
+  }
   return msg || 'Não foi possível acessar a câmera. Verifique a permissão do navegador.';
 }
 
@@ -640,6 +643,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
   const isStoppingRef = useRef(false);
   const isStartingRef = useRef(false);
   const scannerBusyRef = useRef(false);
+  const preflightFailedRef = useRef(false);
   const cameraSessionRef = useRef(0);
   const lastDecodedRef = useRef<string | null>(null);
   const facingModeRef = useRef<'environment' | 'user'>('environment');
@@ -675,11 +679,13 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
   /** Ativa câmera — permissão pedida aqui, no clique do usuário. */
   const ativarModoCamera = useCallback(async () => {
     setCameraError(null);
+    preflightFailedRef.current = false;
     try {
       await preflightCameraPermission(facingModeRef.current);
       setMode('camera');
     } catch (err) {
       console.error('Permissão da câmera:', err);
+      preflightFailedRef.current = true;
       setCameraError(mensagemErroCamera(err));
       setMode('camera');
     }
@@ -776,6 +782,28 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
 
     const waitFor = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
 
+    async function softStopInstance(instance: Html5Qrcode | null): Promise<void> {
+      if (!instance) return;
+      for (let t = 0; t < 3; t++) {
+        try {
+          let running = false;
+          try { running = await instance.isScanning; } catch {}
+          if (running) {
+            try { await instance.stop(); } catch (e: any) {
+              if (!isTransitionError(e)) break;
+              await waitFor(200);
+              continue;
+            }
+          }
+          break;
+        } catch (e: any) {
+          if (!isTransitionError(e)) break;
+          await waitFor(200);
+        }
+      }
+      try { await instance.clear(); } catch {}
+    }
+
     async function stopScannerCompletamente(): Promise<void> {
       if (!scannerRef.current) return;
       if (isStoppingRef.current) return;
@@ -790,26 +818,9 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
       scannerBusyRef.current = true;
       try {
         const instance = scannerRef.current;
-        if (!instance) return;
-        let tries = 0;
-        while (tries < 3) {
-          try {
-            let running = false;
-            try { running = await instance.isScanning; } catch {}
-            if (running) {
-              try { await instance.stop(); } catch (e: any) {
-                if (!isTransitionError(e)) throw e;
-                await waitFor(200);
-                continue;
-              }
-            }
-            break;
-          } catch (e: any) {
-            if (!isTransitionError(e)) { tries++; await waitFor(150); }
-            else { tries++; await waitFor(200); }
-          }
+        if (instance) {
+          await softStopInstance(instance);
         }
-        try { await instance.clear(); } catch {}
       } finally {
         scannerRef.current = null;
         isStoppingRef.current = false;
@@ -868,6 +879,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
         } catch (err: any) {
           lastErr = err;
           if (isTransitionError(err)) {
+            await softStopInstance(html5Qrcode);
             await waitFor(300 + attempt * 200);
             continue;
           }
@@ -877,10 +889,23 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
       throw lastErr;
     }
 
+    function criarScanner(): Html5Qrcode {
+      return new Html5Qrcode("qr-reader", {
+        verbose: false,
+        useBarCodeDetectorIfSupported: true
+      });
+    }
+
     if (mainTab === 'kd' && mode === 'camera') {
       const startScanner = async () => {
         if (isStartingRef.current) return;
         if (scannerBusyRef.current) return;
+
+        if (preflightFailedRef.current) {
+          preflightFailedRef.current = false;
+          return;
+        }
+
         isStartingRef.current = true;
         scannerBusyRef.current = true;
 
@@ -901,12 +926,6 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
             throw new Error("Elemento do leitor de QR não encontrado no DOM.");
           }
 
-          const html5Qrcode = new Html5Qrcode("qr-reader", {
-            verbose: false,
-            useBarCodeDetectorIfSupported: true
-          });
-          scannerRef.current = html5Qrcode;
-
           const container = document.getElementById("qr-reader")?.parentElement?.clientWidth ?? 320;
           const boxSize = Math.max(220, Math.min(container * 0.82, 380));
           const facing = facingModeRef.current;
@@ -919,13 +938,21 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
           const configSimples: MediaTrackConstraints = { facingMode: facing };
 
           let started = false;
+          let html5Qrcode = criarScanner();
+          scannerRef.current = html5Qrcode;
+
           try {
             await iniciarScannerComConstraints(html5Qrcode, configAvancada, boxSize);
             started = true;
           } catch (errAvancado) {
             console.warn('Câmera: fallback para constraints simples', errAvancado);
-            await waitFor(200);
+            await softStopInstance(html5Qrcode);
+            scannerRef.current = null;
+            await waitFor(300);
             if (!isMounted || sessionId !== cameraSessionRef.current) return;
+
+            html5Qrcode = criarScanner();
+            scannerRef.current = html5Qrcode;
             await iniciarScannerComConstraints(html5Qrcode, configSimples, boxSize);
             started = true;
           }
