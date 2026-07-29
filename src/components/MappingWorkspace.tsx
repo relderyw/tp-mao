@@ -3,16 +3,17 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Search, ChevronLeft, ChevronRight, Play, Pause, Save, RotateCcw,
   CheckCircle2, Clock, AlertCircle, Loader2, Sparkles, User, RefreshCw,
-  Zap, FastForward, ArrowDownRight, Layers
+  Zap, FastForward, ArrowDownRight, Layers, X
 } from 'lucide-react';
 import {
-  getSkusList, getStatsTp, saveSubProcessMeasurements, SkuTp, StatsTp, confirmarMapeamentoForcado
+  getSkusList, getStatsTp, saveSubProcessMeasurements, SkuTp, StatsTp, confirmarMapeamentoForcado, clearSingleMeasurement, recordMeasurementSafe
 } from '../lib/supabase';
 import { getSession } from '../lib/auth';
 
 interface MappingWorkspaceProps {
   initialSku?: string;
   onClose?: () => void;
+  onMappingSaved?: () => void;
 }
 
 // Configuração dos 6 sub-processos — 5 tomadas cada (t1 a t5) + qtd + res (média)
@@ -73,7 +74,7 @@ const PROCESS_CONFIGS = [
   }
 ] as const;
 
-export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) {
+export default function MappingWorkspace({ initialSku, onMappingSaved }: MappingWorkspaceProps) {
   const currentUser = getSession();
   const operatorName = currentUser?.displayName || 'Operador';
 
@@ -82,6 +83,13 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
   const [selectedSkuIndex, setSelectedSkuIndex] = useState<number>(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [loadingSkus, setLoadingSkus] = useState(true);
+  const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [syncingNow, setSyncingNow] = useState(false);
+  const pollingRef = useRef<number | null>(null);
+
+  // Feedback de save (sucesso/erro) para o usuário
+  const [saveFeedback, setSaveFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [savingSlot, setSavingSlot] = useState(false);
 
   // Estatísticas do painel
   const [stats, setStats] = useState<StatsTp>({ total: 8643, concluidos: 0, andamento: 0, pendentes: 8643 });
@@ -130,11 +138,29 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
 
   // Carregar SKUs e estatísticas
   useEffect(() => {
-    loadData();
+    loadData(false);
   }, [searchTerm, initialSku]);
 
-  const loadData = async () => {
-    setLoadingSkus(true);
+  // Mostra feedback de sucesso/erro e auto-limpa após 2.5s
+  const showFeedback = (type: 'success' | 'error', msg: string) => {
+    setSaveFeedback({ type, msg });
+    window.setTimeout(() => setSaveFeedback(null), 2800);
+  };
+
+  // Polling a cada 8s para pegar atualizações de outros analistas (evita "sumiram dados")
+  useEffect(() => {
+    if (pollingRef.current) { window.clearInterval(pollingRef.current); pollingRef.current = null; }
+    pollingRef.current = window.setInterval(() => {
+      loadData(true);
+    }, 8000);
+    return () => {
+      if (pollingRef.current) { window.clearInterval(pollingRef.current); pollingRef.current = null; }
+    };
+  }, []);
+
+  const loadData = async (silent = false) => {
+    if (!silent) setLoadingSkus(true);
+    setSyncingNow(true);
     try {
       let [list, st] = await Promise.all([
         getSkusList(searchTerm, 100),
@@ -149,10 +175,20 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
         }
       }
 
-      setSkus(list);
+      // ↓ Merge inteligente: preserva o SKU atualmente selecionado, mas atualiza os valores do banco
+      // (outro analista pode ter salvo algo enquanto este cliente estava parado)
+      setSkus(prevSkus => {
+        const prevBySku = new Map(prevSkus.map(s => [s.sku, s]));
+        return list.map(newS => {
+          const prev = prevBySku.get(newS.sku);
+          // Se o novo tem updated_at mais recente (ou igual), usa o novo = DADOS MAIS FRESCOS DO BANCO SEMPRE
+          return newS;
+        });
+      });
       setStats(st);
+      setLastSync(new Date());
 
-      if (initialSku && list.length > 0) {
+      if (!silent && initialSku && list.length > 0) {
         const idx = list.findIndex(s => s.sku.toUpperCase() === initialSku.toUpperCase());
         if (idx !== -1) {
           setSelectedSkuIndex(idx);
@@ -164,7 +200,8 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     } catch (err) {
       console.error(err);
     } finally {
-      setLoadingSkus(false);
+      setSyncingNow(false);
+      if (!silent) setLoadingSkus(false);
     }
   };
 
@@ -235,9 +272,11 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
       setInfoSaved(true);
       setTimeout(() => setInfoSaved(false), 2000);
       setSavingInfo(false);
+      onMappingSaved?.();
       return true;
     }
     setSavingInfo(false);
+    showFeedback('error', 'Erro ao salvar informações do item. Tente novamente.');
     return false;
   };
 
@@ -305,6 +344,8 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
   };
 
   // ── Gravar tomada para um sub-processo específico ──────────────────────────
+  //    Usa recordMeasurementSafe() que calcula o SLOT VAZIO com dados FRESCOS DO BANCO
+  //    (evita sobrescrever tomadas de outros analistas simultâneos)
   const recordTimeToProcess = async (
     procConfig: typeof PROCESS_CONFIGS[number],
     customTimeSec?: number,
@@ -316,49 +357,28 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     await flushPendingItemInfo();
 
     const timeToRecord = customTimeSec !== undefined ? customTimeSec : time;
-    if (timeToRecord === 0) return null;
+    if (timeToRecord < 0.05) return null;
 
-    const tVal = Number(timeToRecord.toFixed(2));
+    setSavingSlot(true);
+    const capturedProcId = procConfig.id as any;
+    const capturedQtd = processQtd[procConfig.id] ? Number(processQtd[procConfig.id]) : null;
 
-    // Identifica qual tomada (t1 a t5) está vaga
-    const t1 = selectedSku[procConfig.t1Key as keyof SkuTp] as number | null;
-    const t2 = selectedSku[procConfig.t2Key as keyof SkuTp] as number | null;
-    const t3 = selectedSku[procConfig.t3Key as keyof SkuTp] as number | null;
-    const t4 = selectedSku[procConfig.t4Key as keyof SkuTp] as number | null;
-    const t5 = selectedSku[procConfig.t5Key as keyof SkuTp] as number | null;
-
-    let targetKey: string = procConfig.t1Key;
-    if (t1 == null || t1 === 0) targetKey = procConfig.t1Key;
-    else if (t2 == null || t2 === 0) targetKey = procConfig.t2Key;
-    else if (t3 == null || t3 === 0) targetKey = procConfig.t3Key;
-    else if (t4 == null || t4 === 0) targetKey = procConfig.t4Key;
-    else if (t5 == null || t5 === 0) targetKey = procConfig.t5Key;
-    else targetKey = procConfig.t5Key; // Sobrescreve a 5ª se todas as 5 estiverem preenchidas
-
-    const currentT1 = (targetKey === procConfig.t1Key ? tVal : t1) || 0;
-    const currentT2 = (targetKey === procConfig.t2Key ? tVal : t2) || 0;
-    const currentT3 = (targetKey === procConfig.t3Key ? tVal : t3) || 0;
-    const currentT4 = (targetKey === procConfig.t4Key ? tVal : t4) || 0;
-    const currentT5 = (targetKey === procConfig.t5Key ? tVal : t5) || 0;
-
-    const validTs = [currentT1, currentT2, currentT3, currentT4, currentT5].filter(v => v > 0);
-    const avg = validTs.length > 0 ? Number((validTs.reduce((a, b) => a + b, 0) / validTs.length).toFixed(2)) : 0;
-
-    // Inclui a QTD do processo
-    const qtdVal = processQtd[procConfig.id];
-    const fieldsToSave: Partial<SkuTp> = {
-      [targetKey]: tVal,
-      [procConfig.resKey]: avg,
-      [procConfig.qtdKey]: qtdVal ? Number(qtdVal) : null
-    };
-
-    const updated = await saveSubProcessMeasurements(selectedSku.sku, fieldsToSave, operatorName);
+    const updated = await recordMeasurementSafe(
+      selectedSku.sku,
+      capturedProcId,
+      timeToRecord,
+      capturedQtd,
+      operatorName,
+      4
+    );
 
     if (updated) {
       const newSkus = [...skus];
       newSkus[selectedSkuIndex] = updated;
       setSkus(newSkus);
       setStats(await getStatsTp());
+      onMappingSaved?.();
+      showFeedback('success', `✓ ${procConfig.title}: tomada gravada (${timeToRecord.toFixed(2)}s)`);
 
       // Verifica se completou as 5 tomadas desse sub-processo -> avança pro próximo sub-processo!
       const countRecorded = [
@@ -370,22 +390,28 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
       ].filter(v => v != null && (v as number) > 0).length;
 
       if (countRecorded >= 5) {
-        // Avança automaticamente para o próximo sub-processo na lista
         const currIdx = PROCESS_CONFIGS.findIndex(p => p.id === procConfig.id);
         if (currIdx !== -1 && currIdx < PROCESS_CONFIGS.length - 1) {
-          setActiveProcessId(PROCESS_CONFIGS[currIdx + 1].id);
+          setTimeout(() => setActiveProcessId(PROCESS_CONFIGS[currIdx + 1].id), 200);
         }
       }
+    } else {
+      // FALHA CRÍTICA: NÃO resetamos o cronômetro — usuário pode tentar novamente sem perder o tempo!
+      setSavingSlot(false);
+      showFeedback(
+        'error',
+        `✗ Falha ao gravar ${procConfig.title}! Verifique a conexão e tente novamente. O tempo foi preservado.`
+      );
+      return null;
     }
+    setSavingSlot(false);
 
     if (keepRunningAfter) {
-      // Reinicia o cronômetro do zero imediatamente
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       startTimeRef.current = Date.now();
       timeRef.current = 0;
       setTime(0);
       setIsRunning(true);
-      // Inicia interval manualmente pois isRunning pode já ser true (sem disparo de effect)
       timerRef.current = window.setInterval(() => {
         const elapsed = (Date.now() - startTimeRef.current) / 1000;
         setTime(elapsed);
@@ -396,6 +422,30 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     }
 
     return updated;
+  };
+
+  // ── Apagar UMA tomada INDIVIDUAL (ex: 3T de "Formatar") ────────────────────
+  //    Reflete imediatamente no banco, recalcula a média, mostra feedback.
+  const handleDeleteSingleTime = async (
+    procConfig: typeof PROCESS_CONFIGS[number],
+    slot: 1 | 2 | 3 | 4 | 5,
+    currentVal: number
+  ) => {
+    if (!selectedSku) return;
+    if (!confirm(`Deseja realmente APAGAR a tomada ${slot}T (${currentVal.toFixed(2)}s) do processo "${procConfig.title}"?\nEsta ação refletirá imediatamente no banco de dados e a média será recalculada.`)) return;
+
+    const procId = procConfig.id as any;
+    const updated = await clearSingleMeasurement(selectedSku.sku, procId, slot, operatorName);
+    if (updated) {
+      const newSkus = [...skus];
+      newSkus[selectedSkuIndex] = updated;
+      setSkus(newSkus);
+      setStats(await getStatsTp());
+      onMappingSaved?.();
+      showFeedback('success', `Tomada ${slot}T apagada. Média de "${procConfig.title}" recalculada.`);
+    } else {
+      showFeedback('error', `Falha ao apagar tomada ${slot}T. Tente novamente.`);
+    }
   };
 
   // ── Botão CICLO (Grava tomada atual e reinicia o cronômetro imediatamente) ──
@@ -464,7 +514,6 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
     if (!selectedSku) return;
     if (!confirm(`Deseja realmente confirmar o SKU ${selectedSku.sku} como MAREADO?\nMesmo que nem todos os processos tenham sido concluídos, o status passará a "Concluído".`)) return;
 
-    // Garante salvar infos do item pendentes antes
     await flushPendingItemInfo();
 
     setConfirmingMap(true);
@@ -474,13 +523,18 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
       newSkus[selectedSkuIndex] = updated;
       setSkus(newSkus);
       setStats(await getStatsTp());
+      onMappingSaved?.();
+      showFeedback('success', `✓ SKU ${selectedSku.sku} confirmado como MAREADO!`);
+    } else {
+      showFeedback('error', `✗ Falha ao confirmar mapeamento do SKU ${selectedSku.sku}.`);
     }
     setConfirmingMap(false);
   };
 
-  // Limpar tomadas de um sub-processo
+  // Limpar TODAS as 5 tomadas de um sub-processo
   const handleClearProcess = async (procConfig: typeof PROCESS_CONFIGS[number]) => {
     if (!selectedSku) return;
+    if (!confirm(`Deseja realmente APAGAR TODAS as 5 tomadas do processo "${procConfig.title}"?\nEsta ação não pode ser desfeita e será salva no banco imediatamente.`)) return;
 
     const fieldsToSave: Partial<SkuTp> = {
       [procConfig.t1Key]: null,
@@ -496,7 +550,12 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
       const newSkus = [...skus];
       newSkus[selectedSkuIndex] = updated;
       setSkus(newSkus);
+      setStats(await getStatsTp());
       resetTimer();
+      onMappingSaved?.();
+      showFeedback('success', `Todas as 5 tomadas de "${procConfig.title}" foram apagadas.`);
+    } else {
+      showFeedback('error', `Falha ao apagar tomadas de "${procConfig.title}". Tente novamente.`);
     }
   };
 
@@ -508,6 +567,25 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
 
   return (
     <div className="min-h-screen bg-[#111319] text-white p-4 md:p-6 font-sans">
+      {/* Banner de Feedback (Sucesso/Erro) fixo no topo */}
+      <AnimatePresence>
+        {saveFeedback && (
+          <motion.div
+            initial={{ opacity: 0, y: -24, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -12, scale: 0.95 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className={`fixed top-4 left-1/2 -translate-x-1/2 z-[60] px-5 py-3 rounded-2xl shadow-2xl font-black text-sm max-w-lg text-center border backdrop-blur ${
+              saveFeedback.type === 'success'
+                ? 'bg-emerald-500/95 text-white border-emerald-400/60'
+                : 'bg-rose-500/95 text-white border-rose-400/60'
+            }`}
+          >
+            {saveFeedback.msg}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
 
         {/* ── PAINEL ESQUERDO: LISTA & PROGRESSO (5 colunas no desktop) ── */}
@@ -827,25 +905,39 @@ export default function MappingWorkspace({ initialSku }: MappingWorkspaceProps) 
                           {formatSecondsDisplay(time)}
                         </div>
 
-                        {/* Pílulas das 5 tomadas já gravadas: 1T | 2T | 3T | 4T | 5T */}
+                        {/* Pílulas das 5 tomadas já gravadas: 1T | 2T | 3T | 4T | 5T
+                            Cada tomada PREENCHIDA possui botão X para apagar individualmente. */}
                         <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
                           {[
-                            { label: '1T', val: t1 },
-                            { label: '2T', val: t2 },
-                            { label: '3T', val: t3 },
-                            { label: '4T', val: t4 },
-                            { label: '5T', val: t5 }
+                            { label: '1T', val: t1, slot: 1 as const },
+                            { label: '2T', val: t2, slot: 2 as const },
+                            { label: '3T', val: t3, slot: 3 as const },
+                            { label: '4T', val: t4, slot: 4 as const },
+                            { label: '5T', val: t5, slot: 5 as const }
                           ].map((pill, idx) => (
                             <div
                               key={idx}
-                              className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-black flex items-center gap-1.5 ${
+                              className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-black flex items-center gap-1.5 group ${
                                 pill.val != null
-                                  ? 'bg-slate-800 text-white border-slate-600'
+                                  ? 'bg-slate-800 text-white border-slate-600 hover:border-rose-500/60 transition-colors'
                                   : 'bg-slate-900/50 text-slate-600 border-slate-800 border-dashed'
                               }`}
                             >
                               <span className="text-slate-400 text-[10px]">{pill.label}</span>
                               <span>{pill.val != null ? pill.val.toFixed(1) + 's' : '--'}</span>
+                              {pill.val != null && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteSingleTime(proc, pill.slot, pill.val as number);
+                                  }}
+                                  className="ml-0.5 w-4.5 h-4.5 rounded-full bg-rose-500/15 text-rose-400 opacity-0 group-hover:opacity-100 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center shrink-0"
+                                  style={{ width: 18, height: 18 }}
+                                  title={`Apagar tomada ${pill.slot}T (reflete no banco)`}
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
                             </div>
                           ))}
                         </div>

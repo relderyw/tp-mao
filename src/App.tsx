@@ -162,6 +162,8 @@ function AppContent() {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getSession());
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
+  const [mappingDirtyCounter, setMappingDirtyCounter] = useState(0);
+  const notifyMappingChanged = () => setMappingDirtyCounter(c => c + 1);
 
   // Restore session on mount
   useEffect(() => {
@@ -311,6 +313,7 @@ function AppContent() {
             {activeTab === 'timer' && (
               <MappingWorkspace
                 initialSku={selectedProcessId || undefined}
+                onMappingSaved={notifyMappingChanged}
               />
             )}
             {activeTab === 'reports' && (
@@ -322,6 +325,7 @@ function AppContent() {
                   setSelectedProcessId(sku);
                   setActiveTab('timer');
                 }}
+                mappingDirtyCounter={mappingDirtyCounter}
               />
             )}
             {activeTab === 'users' && isAdmin && (

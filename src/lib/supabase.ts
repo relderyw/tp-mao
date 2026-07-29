@@ -526,64 +526,226 @@ export async function getUniqueAnalysts(): Promise<string[]> {
 }
 
 
-/** Salva as tomadas de um sub-processo específico de um SKU no Supabase */
+/** Salva as tomadas de um sub-processo específico de um SKU no Supabase.
+ *  PROTEÇÃO CONCORRÊNCIA: Sempre lê a versão MAIS RECENTE do banco imediatamente antes
+ *  de escrever (evita sobrepor gravações de outros analistas feitas enquanto este cliente
+ *  estava com dados em cache). Usa operações de MERGE campo-a-campo.
+ */
 export async function saveSubProcessMeasurements(
   sku: string,
   updateFields: Partial<SkuTp>,
+  operatorName: string = 'Operador',
+  maxRetries: number = 3
+): Promise<SkuTp | null> {
+  let lastErr: any = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // 1) BUSCA FRESCA DO BANCO (nunca usa cache de client aqui)
+      const { data: current, error: errSel } = await supabase
+        .from('sku_tp')
+        .select('*')
+        .eq('sku', sku)
+        .single();
+
+      if (errSel && !current) throw errSel;
+
+      const now = new Date();
+      const dataMapStr = now.toISOString();
+
+      const currentTp: any = current || { sku, status: 'pendente' };
+
+      // 2) MERGE CAMPO-A-CAMPO: só atualiza campos em updateFields que tem VALOR EXPLÍCITO (null também vale = apagar tomada).
+      // Campos não mencionados em updateFields → mantém valor do banco (evita sobrepor writes concorrentes).
+      const merged: any = { ...currentTp };
+      for (const k of Object.keys(updateFields)) {
+        merged[k] = (updateFields as any)[k];
+      }
+      merged.responsavel = operatorName;
+      merged.data_map = dataMapStr;
+      merged.updated_at = now.toISOString();
+
+      // 3) Recalcula status com base nos valores do banco + campos novos aplicados
+      const spKeys = ['pegar_ik_t1', 'abrir_t1', 'form_t1', 'desc_t1', 'etq_t1', 'pos_t1'];
+      const hasSome = spKeys.some(k => merged[k] != null);
+      const hasAll = spKeys.every(k => merged[k] != null);
+
+      const jaMapeado = currentTp.status === 'mapeado';
+      if (jaMapeado) {
+        merged.status = 'mapeado';
+      } else if (hasAll) {
+        merged.status = 'mapeado';
+      } else if (hasSome) {
+        merged.status = 'andamento';
+      } else {
+        merged.status = currentTp.status || 'pendente';
+      }
+
+      // 4) Recalcula tempo_total com base nos *_res frescos
+      let total = 0;
+      ['abrir_res', 'form_res', 'desc_res', 'etq_res', 'pos_res', 'pegar_ik_res'].forEach(resKey => {
+        const val = merged[resKey];
+        if (typeof val === 'number') total += val;
+      });
+      merged.tempo_total = Number(total.toFixed(2));
+
+      const cleanMerged = sanitizeSkuTpPayload(merged, false);
+
+      // 5) UPSERT com retorno da linha mais recente do banco
+      const { data: updated, error } = await supabase
+        .from('sku_tp')
+        .upsert(cleanMerged, { onConflict: 'sku' })
+        .select('*')
+        .single();
+
+      if (error) throw error;
+
+      return updated as SkuTp;
+    } catch (err: any) {
+      lastErr = err;
+      console.warn(`[saveSubProcessMeasurements] Tentativa ${attempt}/${maxRetries} falhou para SKU ${sku}:`, err);
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 150 * attempt)); // backoff linear
+      }
+    }
+  }
+
+  console.error(`[saveSubProcessMeasurements] Falhou após ${maxRetries} tentativas para SKU ${sku}:`, lastErr);
+  return null;
+}
+
+/** Grava UMA tomada calculando o SLOT VAZIO usando DADOS FRESCOS DO BANCO.
+ *  Essa é a função SEGURA para múltiplos analistas — evita sobrescrever tomadas simultâneas.
+ *  Retorna SKU atualizado do banco ou null em caso de falha.
+ */
+export async function recordMeasurementSafe(
+  sku: string,
+  processoId: 'pegar_ik' | 'abrir' | 'form' | 'desc' | 'etq' | 'pos',
+  tempoSegundos: number,
+  qtdUnid: number | null,
+  operatorName: string = 'Operador',
+  maxRetries: number = 4
+): Promise<SkuTp | null> {
+  const processKeyMap: Record<string, { t1: string; t2: string; t3: string; t4: string; t5: string; res: string; qtd: string }> = {
+    pegar_ik: { t1: 'pegar_ik_t1', t2: 'pegar_ik_t2', t3: 'pegar_ik_t3', t4: 'pegar_ik_t4', t5: 'pegar_ik_t5', res: 'pegar_ik_res', qtd: 'pegar_ik_qtd' },
+    abrir:    { t1: 'abrir_t1',    t2: 'abrir_t2',    t3: 'abrir_t3',    t4: 'abrir_t4',    t5: 'abrir_t5',    res: 'abrir_res',    qtd: 'abrir_qtd' },
+    form:     { t1: 'form_t1',     t2: 'form_t2',     t3: 'form_t3',     t4: 'form_t4',     t5: 'form_t5',     res: 'form_res',     qtd: 'form_qtd' },
+    desc:     { t1: 'desc_t1',     t2: 'desc_t2',     t3: 'desc_t3',     t4: 'desc_t4',     t5: 'desc_t5',     res: 'desc_res',     qtd: 'desc_qtd' },
+    etq:      { t1: 'etq_t1',      t2: 'etq_t2',      t3: 'etq_t3',      t4: 'etq_t4',      t5: 'etq_t5',      res: 'etq_res',      qtd: 'etq_qtd' },
+    pos:      { t1: 'pos_t1',      t2: 'pos_t2',      t3: 'pos_t3',      t4: 'pos_t4',      t5: 'pos_t5',      res: 'pos_res',      qtd: 'pos_qtd' },
+  };
+  const keys = processKeyMap[processoId];
+  if (!keys) return null;
+
+  const tVal = Number(tempoSegundos.toFixed(2));
+  let lastErr: any = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // 1) READ FRESH: pega a versão MAIS ATUALIZADA do banco NESTE EXATO MOMENTO
+      const { data: fresh, error: errSel } = await supabase
+        .from('sku_tp')
+        .select('*')
+        .eq('sku', sku)
+        .single();
+
+      if (errSel && !fresh) throw errSel;
+
+      const row: any = fresh || { sku, status: 'pendente' };
+
+      // 2) CALCULA SLOT VAZIO baseado nos valores DO BANCO (não do cache local!)
+      const tKeys = [keys.t1, keys.t2, keys.t3, keys.t4, keys.t5];
+      let targetKey = keys.t5;
+      for (let i = 0; i < tKeys.length; i++) {
+        const v = row[tKeys[i]];
+        if (v == null || v === 0) { targetKey = tKeys[i]; break; }
+      }
+
+      // 3) Aplica a nova tomada no slot correto, preserva valores das outras tomadas
+      const updated: any = { ...row };
+      updated[targetKey] = tVal;
+      if (qtdUnid != null && !isNaN(qtdUnid)) {
+        updated[keys.qtd] = qtdUnid;
+      }
+
+      // 4) Recalcula a MÉDIA (_res) baseada nas 5 tomadas DO BANCO + a nova
+      const validTs = tKeys
+        .map(k => updated[k])
+        .filter((v: any) => typeof v === 'number' && v > 0) as number[];
+      const avg = validTs.length > 0
+        ? Number((validTs.reduce((a, b) => a + b, 0) / validTs.length).toFixed(2))
+        : null;
+      updated[keys.res] = avg;
+
+      // 5) Usa saveSubProcessMeasurements que já mergeia, calcula status e tempo_total com retries internos
+      const fieldsToSave: Partial<SkuTp> = {};
+      (fieldsToSave as any)[targetKey] = tVal;
+      (fieldsToSave as any)[keys.res] = avg;
+      if (qtdUnid != null && !isNaN(qtdUnid)) {
+        (fieldsToSave as any)[keys.qtd] = qtdUnid;
+      }
+
+      const result = await saveSubProcessMeasurements(sku, fieldsToSave, operatorName, 2);
+      if (result) return result;
+      throw new Error('saveSubProcessMeasurements retornou null');
+    } catch (err: any) {
+      lastErr = err;
+      console.warn(`[recordMeasurementSafe] Tentativa ${attempt}/${maxRetries} falhou (${processoId} @ ${sku}):`, err);
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 200 * attempt + Math.random() * 100));
+      }
+    }
+  }
+
+  console.error(`[recordMeasurementSafe] Falhou após ${maxRetries} tentativas (${processoId} @ ${sku}):`, lastErr);
+  return null;
+}
+
+/** Remove UMA tomada individual (ex: "pegar_ik_t3") e recalcula a média (_res) do processo no banco.
+ *  Retorna SKU atualizado (com valores do banco) ou null em caso de erro.
+ */
+export async function clearSingleMeasurement(
+  sku: string,
+  processoId: 'pegar_ik' | 'abrir' | 'form' | 'desc' | 'etq' | 'pos',
+  slot: 1 | 2 | 3 | 4 | 5,
   operatorName: string = 'Operador'
 ): Promise<SkuTp | null> {
-  const { data: current } = await supabase
+  const processKeyMap: Record<string, { t1: string; t2: string; t3: string; t4: string; t5: string; res: string }> = {
+    pegar_ik: { t1: 'pegar_ik_t1', t2: 'pegar_ik_t2', t3: 'pegar_ik_t3', t4: 'pegar_ik_t4', t5: 'pegar_ik_t5', res: 'pegar_ik_res' },
+    abrir:    { t1: 'abrir_t1',    t2: 'abrir_t2',    t3: 'abrir_t3',    t4: 'abrir_t4',    t5: 'abrir_t5',    res: 'abrir_res' },
+    form:     { t1: 'form_t1',     t2: 'form_t2',     t3: 'form_t3',     t4: 'form_t4',     t5: 'form_t5',     res: 'form_res' },
+    desc:     { t1: 'desc_t1',     t2: 'desc_t2',     t3: 'desc_t3',     t4: 'desc_t4',     t5: 'desc_t5',     res: 'desc_res' },
+    etq:      { t1: 'etq_t1',      t2: 'etq_t2',      t3: 'etq_t3',      t4: 'etq_t4',      t5: 'etq_t5',      res: 'etq_res' },
+    pos:      { t1: 'pos_t1',      t2: 'pos_t2',      t3: 'pos_t3',      t4: 'pos_t4',      t5: 'pos_t5',      res: 'pos_res' },
+  };
+  const keys = processKeyMap[processoId];
+  if (!keys) return null;
+  const slotKey = (keys as any)[`t${slot}`];
+  if (!slotKey) return null;
+
+  const { data: fresh }: any = await supabase
     .from('sku_tp')
     .select('*')
     .eq('sku', sku)
     .single();
 
-  const now = new Date();
-  const dataMapStr = now.toISOString();
+  if (!fresh) return null;
 
-  const currentTp = current || { sku, status: 'pendente' };
-  const merged = {
-    ...currentTp,
-    ...updateFields,
-    responsavel: operatorName,
-    data_map: dataMapStr,
-    updated_at: now.toISOString()
-  };
+  const newTs = { ...fresh };
+  newTs[slotKey] = null;
 
-  const spKeys = ['pegar_ik_t1', 'abrir_t1', 'form_t1', 'desc_t1', 'etq_t1', 'pos_t1'];
-  const hasSome = spKeys.some(k => merged[k as keyof SkuTp] != null);
-  const hasAll = spKeys.every(k => merged[k as keyof SkuTp] != null);
+  const validTs = [1,2,3,4,5]
+    .map(i => newTs[(keys as any)[`t${i}`]])
+    .filter((v: any) => typeof v === 'number' && v > 0) as number[];
+  const avg = validTs.length > 0
+    ? Number((validTs.reduce((a, b) => a + b, 0) / validTs.length).toFixed(2))
+    : null;
+  newTs[keys.res] = avg;
 
-  // Preserva status "mapeado" caso já tenha sido confirmado manualmente (mesmo que incompleto)
-  const jaMapeado = currentTp.status === 'mapeado';
-  if (jaMapeado) {
-    merged.status = 'mapeado';
-  } else if (hasAll) {
-    merged.status = 'mapeado';
-  } else if (hasSome) {
-    merged.status = 'andamento';
-  }
-
-  let total = 0;
-  ['abrir_res', 'form_res', 'desc_res', 'etq_res', 'pos_res', 'pegar_ik_res'].forEach(resKey => {
-    const val = merged[resKey as keyof SkuTp];
-    if (typeof val === 'number') total += val;
-  });
-  merged.tempo_total = Number(total.toFixed(2));
-
-  const cleanMerged = sanitizeSkuTpPayload(merged, false);
-
-  const { data: updated, error } = await supabase
-    .from('sku_tp')
-    .upsert(cleanMerged, { onConflict: 'sku' })
-    .select('*')
-    .single();
-
-  if (error) {
-    console.error('Erro ao salvar medição:', error);
-    return null;
-  }
-  return updated;
+  const clean: Partial<SkuTp> = {};
+  (clean as any)[slotKey] = null;
+  (clean as any)[keys.res] = avg;
+  return await saveSubProcessMeasurements(sku, clean, operatorName);
 }
 
 /** Força um SKU a ter status 'mapeado' (conclusão manual mesmo com processos incompletos) */

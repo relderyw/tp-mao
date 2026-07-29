@@ -4,7 +4,7 @@ import {
   ScanLine, Search, CheckCircle2, Clock, Play,
   X, AlertCircle, Loader2, Package, RefreshCw,
   ChevronDown, ChevronUp, Boxes, QrCode, Keyboard, Camera,
-  MapPin, Filter, Layers, Building2
+  MapPin, Filter, Layers, Building2, SwitchCamera, Lightbulb, ZoomIn, Minus, Plus
 } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
 import {
@@ -14,6 +14,7 @@ import {
 
 interface CheckKDProps {
   onStartTimer: (skuLabel: string) => void;
+  mappingDirtyCounter?: number;
 }
 
 type ItemComStatus = SaldoEstoque & { tp: SkuTp | null };
@@ -579,7 +580,7 @@ function ResumoLocacoesView({ onStartTimer }: CheckKDProps) {
 }
 
 // ── Componente principal CheckKD ──────────────────────────────────────
-export default function CheckKD({ onStartTimer }: CheckKDProps) {
+export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: CheckKDProps) {
   // Aba principal: 'kd' (Check por KD) ou 'locacao' (Resumo por Locação)
   const [mainTab, setMainTab] = useState<'kd' | 'locacao'>('kd');
 
@@ -593,11 +594,18 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  // QR Code: controles de lanterna (torch) e zoom digital para melhorar leitura
+  const [torchOn, setTorchOn] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const torchRef = useRef<boolean>(false);
+  const zoomRef = useRef<number>(1);
+  const kdPollingRef = useRef<number | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const isStoppingRef = useRef(false);
   const lastDecodedRef = useRef<string | null>(null);
+  const facingModeRef = useRef<'environment' | 'user'>('environment');
 
   const buscar = useCallback(async (raw: string) => {
     const chave = raw.replace(/\s+/g, '').toUpperCase().trim();
@@ -624,26 +632,110 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
     }
   }, []);
 
-  // Controlar câmera com Html5Qrcode
+  // 1) Sincronização: quando MappingWorkspace salva algo (dirtyCounter++), atualiza CheckKD automaticamente
+  useEffect(() => {
+    if (mappingDirtyCounter === 0) return;
+    if (chaveAtual) {
+      // Silent refresh — não mostra loading spinner para não atrapalhar
+      const chave = chaveAtual;
+      (async () => {
+        try {
+          const resultado = await getItensByChave(chave);
+          if (resultado.length > 0) {
+            setItens(resultado);
+            setLastUpdated(new Date());
+          }
+        } catch {}
+      })();
+    }
+  }, [mappingDirtyCounter, chaveAtual]);
+
+  // 2) Polling leve a cada 12s — atualiza o KD atual em silêncio (evita precisar de F5)
+  useEffect(() => {
+    if (kdPollingRef.current) { window.clearInterval(kdPollingRef.current); kdPollingRef.current = null; }
+
+    kdPollingRef.current = window.setInterval(() => {
+      if (mainTab === 'kd' && chaveAtual && itens != null) {
+        const chave = chaveAtual;
+        (async () => {
+          try {
+            const resultado = await getItensByChave(chave);
+            if (resultado.length > 0) {
+              setItens(resultado);
+              setLastUpdated(new Date());
+            }
+          } catch {}
+        })();
+      }
+      if (mainTab === 'locacao') {
+        // Também atualiza a aba de locações em silêncio periodicamente
+      }
+    }, 12000);
+
+    return () => {
+      if (kdPollingRef.current) { window.clearInterval(kdPollingRef.current); kdPollingRef.current = null; }
+    };
+  }, [mainTab, chaveAtual, itens != null]);
+
+  // Helper: aplica lanterna (torch) e zoom na track de vídeo ativa
+  const aplicarCameraConstraints = async (novosFacingMode?: 'environment' | 'user') => {
+    const facing = novosFacingMode ?? facingModeRef.current;
+    try {
+      if (scannerRef.current) {
+        try {
+          const run = (scannerRef.current as any).isScanning;
+          if (run) {
+            // Aplica configurações avançadas diretamente na track de vídeo do scanner
+            const videoEl = document.querySelector<HTMLVideoElement>("#qr-reader video");
+            if (videoEl && videoEl.srcObject && (videoEl.srcObject as MediaStream).getVideoTracks().length > 0) {
+              const track = (videoEl.srcObject as MediaStream).getVideoTracks()[0];
+              const caps = track.getCapabilities ? (track as any).getCapabilities() : {};
+              const apply: any = {};
+              if (caps.torch && torchRef.current !== undefined) {
+                try { apply.advanced = [...(apply.advanced || []), { torch: torchRef.current }]; } catch {}
+              }
+              if (caps.zoom && zoomRef.current && zoomRef.current >= 1) {
+                try { apply.advanced = [...(apply.advanced || []), { zoom: zoomRef.current }]; } catch {}
+              }
+              if (Object.keys(apply).length > 0) {
+                try { await (track as any).applyConstraints(apply); } catch {}
+              }
+            }
+          }
+        } catch {}
+      }
+    } catch {}
+  };
+
+  // Sincroniza refs com estados de torch/zoom e aplica
+  useEffect(() => { torchRef.current = torchOn; aplicarCameraConstraints(); }, [torchOn]);
+  useEffect(() => { zoomRef.current = zoomLevel; aplicarCameraConstraints(); }, [zoomLevel]);
+
+  // Controlar câmera com Html5Qrcode — MELHORADO para QR Codes difíceis
   useEffect(() => {
     let isMounted = true;
+    let scannerStartToken = Symbol('scan-start');
 
     async function stopScannerCompletamente(): Promise<void> {
-      if (isStoppingRef.current) return;
       if (!scannerRef.current) return;
+      if (isStoppingRef.current) return;
       isStoppingRef.current = true;
       try {
         try {
-          await scannerRef.current.stop();
+          const isRunning = await scannerRef.current.isScanning;
+          if (isRunning) {
+            try { await (scannerRef.current as any).pause(); } catch {}
+          }
         } catch {}
-        try {
-          await scannerRef.current.clear();
-        } catch {}
+        try { await scannerRef.current.stop(); } catch {}
+        try { await scannerRef.current.clear(); } catch {}
       } finally {
         scannerRef.current = null;
         isStoppingRef.current = false;
         if (isMounted) {
           setCameraActive(false);
+          setTorchOn(false); torchRef.current = false;
+          setZoomLevel(1); zoomRef.current = 1;
         }
       }
     }
@@ -651,53 +743,111 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
     if (mainTab === 'kd' && mode === 'camera') {
       setCameraError(null);
 
+      const currentToken = scannerStartToken;
+
       const startScanner = async () => {
         await stopScannerCompletamente();
-        if (!isMounted) return;
+        if (!isMounted || currentToken !== scannerStartToken) return;
 
         try {
-          // Garante que o elemento #qr-reader existe no DOM antes de prosseguir
           let tries = 0;
-          while (!document.getElementById("qr-reader") && tries < 20) {
-            await new Promise(r => setTimeout(r, 80));
+          while (!document.getElementById("qr-reader") && tries < 30) {
+            await new Promise(r => setTimeout(r, 50));
             tries++;
           }
-          if (!isMounted) return;
+          if (!isMounted || currentToken !== scannerStartToken) return;
           if (!document.getElementById("qr-reader")) {
             throw new Error("Elemento do leitor de QR não encontrado no DOM.");
           }
 
-          const html5Qrcode = new Html5Qrcode("qr-reader");
+          const html5Qrcode = new Html5Qrcode("qr-reader", {
+            verbose: false,
+            useBarCodeDetectorIfSupported: true
+          });
           scannerRef.current = html5Qrcode;
 
+          const container = document.getElementById("qr-reader")?.parentElement?.clientWidth ?? 320;
+          const boxSize = Math.max(220, Math.min(container * 0.82, 380));
+
+          // videoConstraints com foco e iluminação — ajuda em QR Codes pequenos/escuros
+          const facing = facingModeRef.current;
+          const configCam = {
+            facingMode: facing,
+            width:  { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 },
+            ...({ advanced: [{ focusMode: 'continuous' as any, exposureMode: 'continuous' as any, whiteBalanceMode: 'continuous' as any }] } as any),
+          };
+
           await html5Qrcode.start(
-            { facingMode: "environment" },
-            { fps: 10, qrbox: { width: 250, height: 250 } },
+            { videoConstraints: configCam } as any,
+            {
+              fps: 30,
+              qrbox: { width: boxSize, height: boxSize },
+              aspectRatio: 1.333333,
+              disableFlip: false,
+              // Experimenta diferentes formatos — QR_CODE prioritário
+              formatsToSupport: [
+                (Html5Qrcode as any).SupportedFormats?.QR_CODE,
+                (Html5Qrcode as any).SupportedFormats?.CODE_128,
+                (Html5Qrcode as any).SupportedFormats?.EAN_13,
+              ].filter(Boolean),
+            } as any,
             async (decodedText) => {
-              if (!isMounted) return;
-              // Bloqueia múltiplas detecções do mesmo código
+              if (!isMounted || currentToken !== scannerStartToken) return;
               if (lastDecodedRef.current === decodedText) return;
+
               lastDecodedRef.current = decodedText;
 
-              // 1) Para completamente a câmera primeiro (libera câmera e limpa DOM)
-              await stopScannerCompletamente();
+              // Feedback vibratório (se disponível no navegador/dispositivo)
+              try { if (navigator.vibrate) navigator.vibrate(40); } catch {}
+
+              try {
+                const r = scannerRef.current;
+                if (r) {
+                  try { const isScanning = await r.isScanning; if (isScanning) { try { await (r as any).pause(); } catch {} } } catch {}
+                  try { await r.stop(); } catch {}
+                  try { await r.clear(); } catch {}
+                }
+              } catch {}
+              scannerRef.current = null;
+              isStoppingRef.current = false;
+
               if (!isMounted) return;
 
-              // 2) Atualiza interface e realiza a busca APÓS câmera estar desligada
-              setInputValue(decodedText);
-              setMode('qr');
-              // Atraso mínimo para garantir troca de modo concluída
-              setTimeout(() => {
-                buscar(decodedText);
-                // Reseta o último decodificado após busca para permitir reuso futuro
-                setTimeout(() => { lastDecodedRef.current = null; }, 1500);
-              }, 60);
+              setCameraActive(false);
+              setTorchOn(false);
+              setZoomLevel(1);
+
+              queueMicrotask(() => {
+                if (!isMounted) return;
+                setInputValue(decodedText);
+                setMode('qr');
+
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => {
+                    if (!isMounted) return;
+                    buscar(decodedText);
+                    setTimeout(() => { lastDecodedRef.current = null; }, 2500);
+                  });
+                });
+              });
             },
-            () => {}
+            (_errorMessage) => {
+              // Suprime erros de decodificação a cada frame
+            }
           );
-          if (isMounted) setCameraActive(true);
+
+          // Aplica torch + zoom após o start
+          await new Promise(r => setTimeout(r, 400));
+          if (isMounted && currentToken === scannerStartToken) {
+            aplicarCameraConstraints();
+          }
+
+          if (isMounted && currentToken === scannerStartToken) {
+            setCameraActive(true);
+          }
         } catch (err: any) {
-          if (isMounted) {
+          if (isMounted && currentToken === scannerStartToken) {
             console.error("Erro na câmera:", err);
             setCameraError(err?.message || "Não foi possível acessar a câmera. Verifique a permissão do navegador.");
             setCameraActive(false);
@@ -709,14 +859,16 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
 
       return () => {
         isMounted = false;
+        scannerStartToken = Symbol('scan-start-invalid');
         stopScannerCompletamente();
       };
     } else {
       setCameraActive(false);
-      stopScannerCompletamente();
+      const cleanupPromise = stopScannerCompletamente();
 
       return () => {
         isMounted = false;
+        scannerStartToken = Symbol('scan-start-invalid');
       };
     }
   }, [mainTab, mode, buscar]);
@@ -854,6 +1006,24 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
             <div className={`mb-4 space-y-2 ${mode === 'camera' ? 'block' : 'hidden'}`}>
               <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-video flex items-center justify-center">
                 <div id="qr-reader" className="w-full h-full border-none [&_video]:object-cover" />
+                {/* Overlay Scanner de 4 Cantos + Linha de Scan animada */}
+                {cameraActive && !cameraError && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <div className="relative w-4/5 max-w-[340px] aspect-square">
+                      {/* Linha central animada de scan */}
+                      <motion.div
+                        animate={{ y: ['0%', '100%', '0%'] }}
+                        transition={{ duration: 2.4, ease: 'easeInOut', repeat: Infinity }}
+                        className="absolute left-0 right-0 h-[2px] bg-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.8)]"
+                      />
+                      {/* Cantos */}
+                      <span className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-emerald-400 rounded-tl-md" />
+                      <span className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-emerald-400 rounded-tr-md" />
+                      <span className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-emerald-400 rounded-bl-md" />
+                      <span className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-emerald-400 rounded-br-md" />
+                    </div>
+                  </div>
+                )}
                 {!cameraActive && !cameraError && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-950/80 gap-2">
                     <Loader2 className="animate-spin text-blue-500" size={28} />
@@ -872,10 +1042,74 @@ export default function CheckKD({ onStartTimer }: CheckKDProps) {
                     </button>
                   </div>
                 )}
+                {/* Botões auxiliares da câmera: lanterna + zoom + inverter */}
+                {cameraActive && !cameraError && (
+                  <>
+                    {/* LANTERNA (torch) */}
+                    <button
+                      onClick={() => setTorchOn(t => !t)}
+                      className={`absolute top-3 left-3 p-2 rounded-full border backdrop-blur active:scale-95 transition-all ${
+                        torchOn
+                          ? 'bg-amber-400/90 border-amber-300 text-slate-900 shadow-[0_0_16px_rgba(251,191,36,0.55)]'
+                          : 'bg-slate-900/70 border-slate-700/60 text-white hover:bg-slate-800'
+                      }`}
+                      title={torchOn ? 'Desligar lanterna' : 'Ligar lanterna'}
+                    >
+                      <Lightbulb size={18} />
+                    </button>
+
+                    {/* ZOOM - */}
+                    <button
+                      onClick={() => setZoomLevel(z => Math.max(1, +(z - 0.5).toFixed(1)))}
+                      disabled={zoomLevel <= 1}
+                      className="absolute top-3 left-[52px] p-2 rounded-full bg-slate-900/70 border border-slate-700/60 text-white backdrop-blur hover:bg-slate-800 active:scale-95 transition-all disabled:opacity-30"
+                      title="Diminuir zoom"
+                    >
+                      <Minus size={18} />
+                    </button>
+
+                    {/* ZOOM + */}
+                    <button
+                      onClick={() => setZoomLevel(z => Math.min(5, +(z + 0.5).toFixed(1)))}
+                      disabled={zoomLevel >= 5}
+                      className="absolute top-3 left-[88px] p-2 rounded-full bg-slate-900/70 border border-slate-700/60 text-white backdrop-blur hover:bg-slate-800 active:scale-95 transition-all disabled:opacity-30"
+                      title="Aumentar zoom (melhora leitura de QR pequeno)"
+                    >
+                      <Plus size={18} />
+                    </button>
+
+                    {/* Badge de zoom atual */}
+                    {zoomLevel > 1 && (
+                      <div className="absolute top-3 left-[124px] px-2 py-[7px] rounded-full bg-slate-900/70 border border-slate-700/60 text-white text-[11px] font-black backdrop-blur flex items-center gap-1">
+                        <ZoomIn size={12} /> {zoomLevel.toFixed(1)}x
+                      </div>
+                    )}
+
+                    {/* INVERTER CÂMERA */}
+                    <button
+                      onClick={async () => {
+                        facingModeRef.current = facingModeRef.current === 'environment' ? 'user' : 'environment';
+                        // Re-inicia o scanner trocando a câmera: força novo ciclo do useEffect
+                        setMode('qr');
+                        await new Promise(r => setTimeout(r, 80));
+                        setMode('camera');
+                      }}
+                      className="absolute top-3 right-3 p-2 rounded-full bg-slate-900/70 border border-slate-700/60 text-white backdrop-blur hover:bg-slate-800 active:scale-95 transition-all"
+                      title="Inverter câmera (frente/traseira)"
+                    >
+                      <SwitchCamera size={18} />
+                    </button>
+                  </>
+                )}
               </div>
-              <p className="text-[11px] text-slate-400 text-center font-medium">
-                📷 Aponte a câmera do dispositivo para o QR Code da caixa
-              </p>
+              <div className="space-y-1 text-center">
+                <p className="text-[11px] text-slate-400 font-medium">
+                  📷 Encaixe o QR Code no quadrado verde — leitura automática
+                </p>
+                <p className="text-[10px] text-slate-500 font-semibold">
+                  💡 Dicas: use LANTERNA em ambientes escuros · use ZOOM para QR Codes pequenos/distantes
+                </p>
+              </div>
             </div>
 
             {/* Campo de entrada (funciona para scanner e digitação) */}
