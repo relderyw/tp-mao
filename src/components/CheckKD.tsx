@@ -64,9 +64,9 @@ function cmpStr(a: string, b: string): number {
 
 function ordenarItens<T extends { descricao: string; sku: string; locacao?: string }>(arr: T[]): T[] {
   return [...arr].sort((a, b) => {
-    const r1 = cmpStr(a.descricao, b.descricao);
+    const r1 = cmpStr(a.sku, b.sku);
     if (r1 !== 0) return r1;
-    const r2 = cmpStr(a.sku, b.sku);
+    const r2 = cmpStr(a.descricao, b.descricao);
     if (r2 !== 0) return r2;
     if (a.locacao || b.locacao) return cmpStr(a.locacao || '', b.locacao || '');
     return 0;
@@ -655,6 +655,8 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraRestartKey, setCameraRestartKey] = useState(0);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [itemSearch, setItemSearch] = useState('');
+  const [itemStatusFilter, setItemStatusFilter] = useState<'todos' | 'pendentes' | 'mapeados' | 'fora'>('todos');
   // QR Code: controles de lanterna (torch) e zoom digital para melhorar leitura
   const [torchOn, setTorchOn] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -1063,6 +1065,31 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
 
   const mapeados = itens?.filter(i => i.tp?.status === 'mapeado').length ?? 0;
   const pendentes = itens ? itens.length - mapeados : 0;
+
+  const statusItem = (i: ItemComStatus): 'mapeado' | 'pendente' | 'fora' => {
+    if (i.tp?.status === 'mapeado') return 'mapeado';
+    if (!i.tp) return 'fora';
+    return 'pendente';
+  };
+
+  const itensFiltrados = React.useMemo(() => {
+    if (!itens) return [];
+    const term = itemSearch.trim().toLowerCase();
+    return itens.filter(i => {
+      if (itemStatusFilter === 'pendentes' && statusItem(i) !== 'pendente') return false;
+      if (itemStatusFilter === 'mapeados' && statusItem(i) !== 'mapeado') return false;
+      if (itemStatusFilter === 'fora' && statusItem(i) !== 'fora') return false;
+      if (term) {
+        const hay = `${i.sku} ${i.descricao} ${i.locacao || ''} ${i.modelo || ''} ${i.mod_comp || ''}`.toLowerCase();
+        if (!hay.includes(term)) return false;
+      }
+      return true;
+    });
+  }, [itens, itemSearch, itemStatusFilter]);
+
+  const countFiltMapeados = itensFiltrados.filter(i => statusItem(i) === 'mapeado').length;
+  const countFiltPendentes = itensFiltrados.filter(i => statusItem(i) === 'pendente').length;
+  const countFiltFora = itensFiltrados.filter(i => statusItem(i) === 'fora').length;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-24">
