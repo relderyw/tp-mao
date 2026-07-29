@@ -10,7 +10,8 @@ import { AppUser } from "../lib/auth";
 import {
   getSkusReport, getUniqueModels, getUniqueAnalysts,
   SkuTp, SkusReportFilters, supabase, sanitizeSkuTpPayload,
-  localDateKey, localDateTimeToUtcIso
+  localDateKey, localDateTimeToUtcIso,
+  fmtMappingDate, fmtMappingTime, fmtMappingDateTime
 } from "../lib/supabase";
 
 interface ItemsReportProps {
@@ -113,23 +114,15 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const fmtSec = (val?: number | null) => val != null && val > 0 ? `${val.toFixed(1)}s` : <span className="text-slate-700">—</span>;
 
-  const fmtDateMap = (val?: string | null) => {
-    if (!val) return '—';
-    try {
-      if (val.includes('/')) return val;
-      const d = new Date(val);
-      if (isNaN(d.getTime())) return val;
-      return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return val;
-    }
-  };
+  // Fuso America/Manaus (UTC-4). Registros legados "só data" usam updated_at p/ hora real.
+  const fmtDateMap = (item: SkuTp) => fmtMappingDate(item.data_map, item.updated_at);
+  const fmtTimeMap = (item: SkuTp) => fmtMappingTime(item.data_map, item.updated_at);
 
   const exportCSV = () => {
     const headers = ["SKU","Descricao","Modelo","Status","Analista","Data Map","Tempo Total",...PROCESS_COLS.map(p => p.label)];
     const rows = items.map(i => [
       i.sku, i.descricao, i.modelo||"", i.status,
-      i.responsavel||"", i.data_map||"", i.tempo_total?.toFixed(1)||"",
+      i.responsavel||"", fmtMappingDateTime(i.data_map, i.updated_at)||"", i.tempo_total?.toFixed(1)||"",
       ...PROCESS_COLS.map(p => (i as any)[p.key]?.toFixed(1)||""),
     ]);
     const csv = [headers,...rows].map(r => r.join(",")).join("\n");
@@ -348,7 +341,14 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
                           <td className="px-4 py-3"><span className="text-slate-400 text-xs font-semibold">{item.modelo||"—"}</span></td>
                           <td className="px-4 py-3 text-center"><span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black ${s.color} ${s.bg}`}>{s.icon}{s.label}</span></td>
                           <td className="px-4 py-3"><span className="text-slate-400 text-xs">{item.responsavel||"—"}</span></td>
-                          <td className="px-4 py-3"><span className="text-slate-500 text-xs font-mono">{fmtDateMap(item.data_map)}</span></td>
+                          <td className="px-4 py-3 leading-tight">
+                            <span className="block text-slate-200 text-xs font-bold font-mono">{fmtDateMap(item)}</span>
+                            {(() => {
+                              const t = fmtTimeMap(item);
+                              if (!t) return null;
+                              return <span className="block text-slate-500 text-[10px] font-semibold font-mono mt-0.5">{t}</span>;
+                            })()}
+                          </td>
                           <td className="px-4 py-3 text-right"><span className={`font-mono font-black text-xs ${item.tempo_total ? "text-white" : "text-slate-700"}`}>{item.tempo_total ? `${item.tempo_total.toFixed(1)}s` : "—"}</span></td>
                           {PROCESS_COLS.map(p => <td key={p.key} className="px-3 py-3 text-right"><span className={`font-mono text-xs ${(item as any)[p.key] ? p.color : "text-slate-700"}`}>{fmtSec((item as any)[p.key])}</span></td>)}
                         </tr>

@@ -12,6 +12,39 @@ import {
   LocacaoResumo, LocacaoItem
 } from '../lib/supabase';
 
+/** Mensagem amigável para erros comuns de getUserMedia / câmera. */
+function mensagemErroCamera(err: unknown): string {
+  const name = (err as any)?.name || '';
+  const msg = String((err as any)?.message || err || '');
+  if (name === 'NotAllowedError' || /permission/i.test(msg)) {
+    return 'Permissão da câmera negada. Clique no ícone de cadeado na barra do navegador, permita a câmera e tente novamente.';
+  }
+  if (name === 'NotFoundError' || /not found|no device/i.test(msg)) {
+    return 'Nenhuma câmera encontrada neste dispositivo.';
+  }
+  if (name === 'NotReadableError' || /in use|busy/i.test(msg)) {
+    return 'A câmera está em uso por outro aplicativo. Feche outros apps que usam a câmera e tente novamente.';
+  }
+  if (name === 'OverconstrainedError' || /constraint/i.test(msg)) {
+    return 'Configuração da câmera não suportada neste dispositivo. Tentando modo simplificado…';
+  }
+  if (/secure context|https/i.test(msg)) {
+    return 'A câmera só funciona em HTTPS ou localhost. Acesse o site por uma conexão segura.';
+  }
+  return msg || 'Não foi possível acessar a câmera. Verifique a permissão do navegador.';
+}
+
+/** Solicita permissão no contexto do clique do usuário (exigido por Chrome/Safari). */
+async function preflightCameraPermission(facingMode: 'environment' | 'user' = 'environment'): Promise<void> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error('Seu navegador não suporta acesso à câmera.');
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode },
+  });
+  stream.getTracks().forEach(t => t.stop());
+}
+
 interface CheckKDProps {
   onStartTimer: (skuLabel: string) => void;
   mappingDirtyCounter?: number;
@@ -593,6 +626,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
   const [chaveAtual, setChaveAtual] = useState(() => sessionStorage.getItem('LAST_CHECKED_KD_KEY') || '');
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraRestartKey, setCameraRestartKey] = useState(0);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   // QR Code: controles de lanterna (torch) e zoom digital para melhorar leitura
   const [torchOn, setTorchOn] = useState(false);
@@ -604,8 +638,11 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
   const inputRef = useRef<HTMLInputElement>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const isStoppingRef = useRef(false);
+  const isStartingRef = useRef(false);
+  const cameraSessionRef = useRef(0);
   const lastDecodedRef = useRef<string | null>(null);
   const facingModeRef = useRef<'environment' | 'user'>('environment');
+  const buscarRef = useRef<(raw: string) => Promise<void>>(async () => {});
 
   const buscar = useCallback(async (raw: string) => {
     const chave = raw.replace(/\s+/g, '').toUpperCase().trim();
@@ -629,6 +666,21 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
       setError('Erro ao consultar o banco: ' + (err.message || 'Falha de conexão'));
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { buscarRef.current = buscar; }, [buscar]);
+
+  /** Ativa câmera — permissão pedida aqui, no clique do usuário. */
+  const ativarModoCamera = useCallback(async () => {
+    setCameraError(null);
+    try {
+      await preflightCameraPermission(facingModeRef.current);
+      setMode('camera');
+    } catch (err) {
+      console.error('Permissão da câmera:', err);
+      setCameraError(mensagemErroCamera(err));
+      setMode('camera');
     }
   }, []);
 
@@ -711,10 +763,10 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
   useEffect(() => { torchRef.current = torchOn; aplicarCameraConstraints(); }, [torchOn]);
   useEffect(() => { zoomRef.current = zoomLevel; aplicarCameraConstraints(); }, [zoomLevel]);
 
-  // Controlar câmera com Html5Qrcode — MELHORADO para QR Codes difíceis
+  // Controlar câmera com Html5Qrcode — permissão já concedida no clique (ativarModoCamera)
   useEffect(() => {
     let isMounted = true;
-    let scannerStartToken = Symbol('scan-start');
+    const sessionId = ++cameraSessionRef.current;
 
     async function stopScannerCompletamente(): Promise<void> {
       if (!scannerRef.current) return;
@@ -732,6 +784,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
       } finally {
         scannerRef.current = null;
         isStoppingRef.current = false;
+        isStartingRef.current = false;
         if (isMounted) {
           setCameraActive(false);
           setTorchOn(false); torchRef.current = false;
@@ -740,14 +793,59 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
       }
     }
 
+    const scanConfig = (boxSize: number) => ({
+      fps: 24,
+      qrbox: { width: boxSize, height: boxSize },
+      aspectRatio: 1.333333,
+      disableFlip: false,
+      formatsToSupport: [
+        (Html5Qrcode as any).SupportedFormats?.QR_CODE,
+        (Html5Qrcode as any).SupportedFormats?.CODE_128,
+        (Html5Qrcode as any).SupportedFormats?.EAN_13,
+      ].filter(Boolean),
+    });
+
+    const onScanSuccess = async (decodedText: string) => {
+      if (!isMounted || sessionId !== cameraSessionRef.current) return;
+      if (lastDecodedRef.current === decodedText) return;
+      lastDecodedRef.current = decodedText;
+
+      try { if (navigator.vibrate) navigator.vibrate(40); } catch {}
+
+      await stopScannerCompletamente();
+      if (!isMounted) return;
+
+      setInputValue(decodedText);
+      setMode('qr');
+      buscarRef.current(decodedText);
+      setTimeout(() => { lastDecodedRef.current = null; }, 2500);
+    };
+
+    async function iniciarScannerComConstraints(
+      html5Qrcode: Html5Qrcode,
+      videoConstraints: MediaTrackConstraints,
+      boxSize: number
+    ): Promise<void> {
+      await html5Qrcode.start(
+        { videoConstraints } as any,
+        scanConfig(boxSize) as any,
+        onScanSuccess,
+        () => {}
+      );
+    }
+
     if (mainTab === 'kd' && mode === 'camera') {
-      setCameraError(null);
-
-      const currentToken = scannerStartToken;
-
       const startScanner = async () => {
+        if (isStartingRef.current) return;
+        isStartingRef.current = true;
+
         await stopScannerCompletamente();
-        if (!isMounted || currentToken !== scannerStartToken) return;
+        // Aguarda liberação da câmera (React StrictMode / troca rápida de aba)
+        await new Promise(r => setTimeout(r, 150));
+        if (!isMounted || sessionId !== cameraSessionRef.current) {
+          isStartingRef.current = false;
+          return;
+        }
 
         try {
           let tries = 0;
@@ -755,7 +853,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
             await new Promise(r => setTimeout(r, 50));
             tries++;
           }
-          if (!isMounted || currentToken !== scannerStartToken) return;
+          if (!isMounted || sessionId !== cameraSessionRef.current) return;
           if (!document.getElementById("qr-reader")) {
             throw new Error("Elemento do leitor de QR não encontrado no DOM.");
           }
@@ -768,90 +866,38 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
 
           const container = document.getElementById("qr-reader")?.parentElement?.clientWidth ?? 320;
           const boxSize = Math.max(220, Math.min(container * 0.82, 380));
-
-          // videoConstraints com foco e iluminação — ajuda em QR Codes pequenos/escuros
           const facing = facingModeRef.current;
-          const configCam = {
+
+          const configAvancada: MediaTrackConstraints = {
             facingMode: facing,
-            width:  { ideal: 1920, min: 1280 },
-            height: { ideal: 1080, min: 720 },
-            ...({ advanced: [{ focusMode: 'continuous' as any, exposureMode: 'continuous' as any, whiteBalanceMode: 'continuous' as any }] } as any),
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
           };
+          const configSimples: MediaTrackConstraints = { facingMode: facing };
 
-          await html5Qrcode.start(
-            { videoConstraints: configCam } as any,
-            {
-              fps: 30,
-              qrbox: { width: boxSize, height: boxSize },
-              aspectRatio: 1.333333,
-              disableFlip: false,
-              // Experimenta diferentes formatos — QR_CODE prioritário
-              formatsToSupport: [
-                (Html5Qrcode as any).SupportedFormats?.QR_CODE,
-                (Html5Qrcode as any).SupportedFormats?.CODE_128,
-                (Html5Qrcode as any).SupportedFormats?.EAN_13,
-              ].filter(Boolean),
-            } as any,
-            async (decodedText) => {
-              if (!isMounted || currentToken !== scannerStartToken) return;
-              if (lastDecodedRef.current === decodedText) return;
-
-              lastDecodedRef.current = decodedText;
-
-              // Feedback vibratório (se disponível no navegador/dispositivo)
-              try { if (navigator.vibrate) navigator.vibrate(40); } catch {}
-
-              try {
-                const r = scannerRef.current;
-                if (r) {
-                  try { const isScanning = await r.isScanning; if (isScanning) { try { await (r as any).pause(); } catch {} } } catch {}
-                  try { await r.stop(); } catch {}
-                  try { await r.clear(); } catch {}
-                }
-              } catch {}
-              scannerRef.current = null;
-              isStoppingRef.current = false;
-
-              if (!isMounted) return;
-
-              setCameraActive(false);
-              setTorchOn(false);
-              setZoomLevel(1);
-
-              queueMicrotask(() => {
-                if (!isMounted) return;
-                setInputValue(decodedText);
-                setMode('qr');
-
-                requestAnimationFrame(() => {
-                  requestAnimationFrame(() => {
-                    if (!isMounted) return;
-                    buscar(decodedText);
-                    setTimeout(() => { lastDecodedRef.current = null; }, 2500);
-                  });
-                });
-              });
-            },
-            (_errorMessage) => {
-              // Suprime erros de decodificação a cada frame
-            }
-          );
-
-          // Aplica torch + zoom após o start
-          await new Promise(r => setTimeout(r, 400));
-          if (isMounted && currentToken === scannerStartToken) {
-            aplicarCameraConstraints();
+          try {
+            await iniciarScannerComConstraints(html5Qrcode, configAvancada, boxSize);
+          } catch (errAvancado) {
+            console.warn('Câmera: fallback para constraints simples', errAvancado);
+            try { await html5Qrcode.stop(); } catch {}
+            try { await html5Qrcode.clear(); } catch {}
+            await iniciarScannerComConstraints(html5Qrcode, configSimples, boxSize);
           }
 
-          if (isMounted && currentToken === scannerStartToken) {
+          await new Promise(r => setTimeout(r, 300));
+          if (isMounted && sessionId === cameraSessionRef.current) {
+            aplicarCameraConstraints();
             setCameraActive(true);
+            setCameraError(null);
           }
         } catch (err: any) {
-          if (isMounted && currentToken === scannerStartToken) {
+          if (isMounted && sessionId === cameraSessionRef.current) {
             console.error("Erro na câmera:", err);
-            setCameraError(err?.message || "Não foi possível acessar a câmera. Verifique a permissão do navegador.");
+            setCameraError(mensagemErroCamera(err));
             setCameraActive(false);
           }
+        } finally {
+          isStartingRef.current = false;
         }
       };
 
@@ -859,19 +905,18 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
 
       return () => {
         isMounted = false;
-        scannerStartToken = Symbol('scan-start-invalid');
+        cameraSessionRef.current++;
         stopScannerCompletamente();
       };
-    } else {
-      setCameraActive(false);
-      const cleanupPromise = stopScannerCompletamente();
-
-      return () => {
-        isMounted = false;
-        scannerStartToken = Symbol('scan-start-invalid');
-      };
     }
-  }, [mainTab, mode, buscar]);
+
+    setCameraActive(false);
+    stopScannerCompletamente();
+    return () => {
+      isMounted = false;
+      cameraSessionRef.current++;
+    };
+  }, [mainTab, mode, cameraRestartKey]);
 
   // Auto-foco e auto-recarregamento ao voltar para a aba
   useEffect(() => {
@@ -977,7 +1022,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
             {/* Toggle 3 Modos: Câmera | Leitor USB | Digitar */}
             <div className="flex bg-slate-100 rounded-xl p-1 gap-1 mb-4 overflow-x-auto">
               <button
-                onClick={() => setMode('camera')}
+                onClick={() => { if (mode !== 'camera') void ativarModoCamera(); }}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
                   mode === 'camera' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900'
                 }`}
@@ -1033,13 +1078,21 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
                 {cameraError && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 bg-slate-950/90 p-4 text-center gap-2">
                     <AlertCircle size={28} />
-                    <span className="text-xs font-bold">{cameraError}</span>
-                    <button
-                      onClick={() => setMode('qr')}
-                      className="mt-2 text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700"
-                    >
-                      Usar Leitor USB / Digitação
-                    </button>
+                    <span className="text-xs font-bold max-w-sm">{cameraError}</span>
+                    <div className="flex flex-wrap justify-center gap-2 mt-2">
+                      <button
+                        onClick={() => void ativarModoCamera()}
+                        className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-500 font-bold"
+                      >
+                        Tentar novamente
+                      </button>
+                      <button
+                        onClick={() => setMode('qr')}
+                        className="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700"
+                      >
+                        Usar Leitor USB / Digitação
+                      </button>
+                    </div>
                   </div>
                 )}
                 {/* Botões auxiliares da câmera: lanterna + zoom + inverter */}
@@ -1087,12 +1140,9 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
 
                     {/* INVERTER CÂMERA */}
                     <button
-                      onClick={async () => {
+                      onClick={() => {
                         facingModeRef.current = facingModeRef.current === 'environment' ? 'user' : 'environment';
-                        // Re-inicia o scanner trocando a câmera: força novo ciclo do useEffect
-                        setMode('qr');
-                        await new Promise(r => setTimeout(r, 80));
-                        setMode('camera');
+                        setCameraRestartKey(k => k + 1);
                       }}
                       className="absolute top-3 right-3 p-2 rounded-full bg-slate-900/70 border border-slate-700/60 text-white backdrop-blur hover:bg-slate-800 active:scale-95 transition-all"
                       title="Inverter câmera (frente/traseira)"

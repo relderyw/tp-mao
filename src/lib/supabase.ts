@@ -10,6 +10,11 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 // Quando precisar AGUPAR / COMPARAR por DIA LOCAL (Manaus = UTC-4),
 // SEMPRE converta o timestamp UTC para a data de referência LOCAL antes.
 
+// Fuso HORÁRIO PADRÃO da aplicação = Manaus (UTC-4).
+// Usamos timezone EXPLÍCITO para não depender das configurações do SO do usuário,
+// que pode estar em "America/Sao_Paulo" (UTC-3) e distorcer todos os horários em 1h.
+export const MANAUS_TZ = 'America/Manaus';
+
 /** Converte Data → "YYYY-MM-DD" no FUSO LOCAL DO NAVEGADOR (não UTC).
  *  Ex: 2026-07-29T02:00:00Z (UTC) → 2026-07-28 em Manaus (UTC-4). */
 export function localDateKey(dateInput: Date | string): string {
@@ -19,6 +24,135 @@ export function localDateKey(dateInput: Date | string): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${dd}`;
+}
+
+/** Extrai YYYY-MM-DD do início de um timestamp ISO (ignora conversão de fuso). */
+export function parseIsoCalendarDate(raw: string): { y: number; m: number; d: number } | null {
+  const m = String(raw).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return { y: +m[1], m: +m[2], d: +m[3] };
+}
+
+/** Registros antigos gravados só como data viram meia-noite UTC no Postgres → 20:00 falso em Manaus. */
+export function isLegacyDateOnlyTimestamp(raw: string, d: Date): boolean {
+  const trimmed = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return true;
+  // Meia-noite UTC exata = coluna date ou import legado sem horário real.
+  // Cobre "2026-07-28T00:00:00Z" e "2026-07-28 00:00:00+00" (espaço em vez de T).
+  return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 &&
+         d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+}
+
+/** "YYYY-MM-DD…" → "dd/MM/yyyy" sem deslocar o dia por fuso horário. */
+export function fmtLegacyCalendarDate(raw: string): string {
+  const cal = parseIsoCalendarDate(raw);
+  if (!cal) return '—';
+  return `${String(cal.d).padStart(2, '0')}/${String(cal.m).padStart(2, '0')}/${cal.y}`;
+}
+
+/** Converte ISO-UTC (ou Date) → "dd/MM/yyyy" no fuso EXPLÍCITO de Manaus. */
+export function fmtManausDate(dateInput: Date | string | null | undefined): string {
+  if (!dateInput) return '—';
+  try {
+    const raw = String(dateInput);
+    const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+    if (isNaN(d.getTime())) return raw;
+    if (isLegacyDateOnlyTimestamp(raw, d)) return fmtLegacyCalendarDate(raw);
+    return new Intl.DateTimeFormat('pt-BR', {
+      timeZone: MANAUS_TZ,
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(d);
+  } catch { return String(dateInput); }
+}
+
+/** Converte ISO-UTC (ou Date) → "dd/MM/yyyy HH:mm" no fuso EXPLÍCITO de Manaus.
+ *  Detecta automaticamente: se o valor original é SÓ DATA ("YYYY-MM-DD" sem horário),
+ *  retorna a data SEM adicionar horário falso (ex: não inventa "20:00"). */
+export function fmtManausDateTime(dateInput: Date | string | null | undefined): string {
+  if (!dateInput) return '—';
+  try {
+    const raw = String(dateInput);
+    const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+    if (isNaN(d.getTime())) return raw;
+
+    // Caso 1: valor SÓ DATA legado → exibimos apenas a data, sem horário inventado (20:00).
+    if (isLegacyDateOnlyTimestamp(raw, d)) {
+      return fmtLegacyCalendarDate(raw);
+    }
+
+    // Caso 2: ISO com horário UTC — formatamos data+horário em Manaus (UTC-4).
+    const partes = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: MANAUS_TZ,
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(d).reduce<Record<string, string>>((acc, p) => {
+      acc[p.type] = p.value; return acc;
+    }, {});
+    return `${partes.day}/${partes.month}/${partes.year}\n${partes.hour}:${partes.minute}`;
+  } catch { return String(dateInput); }
+}
+
+/** Converte ISO-UTC (ou Date) → "HH:mm" no fuso EXPLÍCITO de Manaus.
+ *  Se o valor for "só data" retorna vazio, não inventa 20:00. */
+export function fmtManausTime(dateInput: Date | string | null | undefined): string {
+  if (!dateInput) return '';
+  try {
+    const raw = String(dateInput);
+    const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+    if (isNaN(d.getTime())) return '';
+    if (isLegacyDateOnlyTimestamp(raw, d)) return '';
+    const partes = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: MANAUS_TZ,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(d).reduce<Record<string, string>>((acc, p) => {
+      acc[p.type] = p.value; return acc;
+    }, {});
+    return `${partes.hour}:${partes.minute}`;
+  } catch { return ''; }
+}
+
+/** Data de mapeamento para exibição — trata registros legados e timestamps reais. */
+export function fmtMappingDate(
+  dataMap?: string | null,
+  _updatedAt?: string | null
+): string {
+  return fmtManausDate(dataMap);
+}
+
+/** Hora de mapeamento — usa updated_at quando data_map é legado sem horário real. */
+export function fmtMappingTime(
+  dataMap?: string | null,
+  updatedAt?: string | null
+): string {
+  if (!dataMap) return updatedAt ? fmtManausTime(updatedAt) : '';
+  try {
+    const raw = String(dataMap);
+    const d = new Date(dataMap);
+    if (isNaN(d.getTime())) return '';
+    if (isLegacyDateOnlyTimestamp(raw, d)) {
+      return updatedAt ? fmtManausTime(updatedAt) : '';
+    }
+    return fmtManausTime(d);
+  } catch { return ''; }
+}
+
+/** Data+hora de mapeamento para exibição/CSV. */
+export function fmtMappingDateTime(
+  dataMap?: string | null,
+  updatedAt?: string | null
+): string {
+  const date = fmtMappingDate(dataMap, updatedAt);
+  const time = fmtMappingTime(dataMap, updatedAt);
+  if (date === '—') return '—';
+  return time ? `${date} ${time}` : date;
 }
 
 /** Data "YYYY-MM-DD" no fuso LOCAL → ISO UTC do 1° segundo daquele dia.
