@@ -9,7 +9,8 @@ import {
 import { AppUser } from "../lib/auth";
 import {
   getSkusReport, getUniqueModels, getUniqueAnalysts,
-  SkuTp, SkusReportFilters, supabase, sanitizeSkuTpPayload
+  SkuTp, SkusReportFilters, supabase, sanitizeSkuTpPayload,
+  localDateKey, localDateTimeToUtcIso
 } from "../lib/supabase";
 
 interface ItemsReportProps {
@@ -135,7 +136,7 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
     const blob = new Blob([csv],{type:"text/csv;charset=utf-8;"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href=url; a.download=`itens_tp_${new Date().toISOString().slice(0,10)}.csv`;
+    a.href=url; a.download=`itens_tp_${localDateKey(new Date())}.csv`;
     a.click(); URL.revokeObjectURL(url);
   };
 
@@ -150,14 +151,24 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
         if (typeof val === "number") totalTime += val;
       });
 
-      let cleanDataMap = editingItem.data_map;
-      if (cleanDataMap && cleanDataMap.includes('/')) {
-        const parts = cleanDataMap.split(' ');
-        if (parts[0]) {
-          const [d, m, y] = parts[0].split('/');
+      let cleanDataMap: string | null | undefined = editingItem.data_map;
+      if (cleanDataMap) {
+        if (cleanDataMap.includes('/')) {
+          // Formato pt-BR: "28/07/2026 14:30" (data LOCAL do usuário)
+          const [datePart, timePart = '00:00:00'] = cleanDataMap.split(' ');
+          const [d, m, y] = (datePart || '').split('/');
           if (d && m && y) {
-            cleanDataMap = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T${parts[1] || '00:00:00'}Z`;
+            // Converte data LOCAL Manaus → ISO UTC equivalente para salvar no banco
+            cleanDataMap = localDateTimeToUtcIso(`${y}-${m}-${d}`, timePart);
           }
+        } else if (/^\d{4}-\d{2}-\d{2}$/.test(cleanDataMap)) {
+          // Usuário digitou apenas data ISO "2026-07-28" → trata como dia LOCAL 00:00:00
+          cleanDataMap = localDateTimeToUtcIso(cleanDataMap, '00:00:00');
+        } else if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(cleanDataMap) && !cleanDataMap.endsWith('Z')) {
+          // Data ISO SEM "Z" (ex: 2026-07-28 14:30) → trata como horário LOCAL, não UTC.
+          const [datePart, rest] = cleanDataMap.replace('T', ' ').split(' ');
+          const [h = '00', mi = '00', s = '00'] = (rest || '00:00:00').split(':');
+          cleanDataMap = localDateTimeToUtcIso(datePart, `${h}:${mi}:${s}`);
         }
       }
 

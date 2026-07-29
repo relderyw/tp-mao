@@ -5,6 +5,47 @@ const supabaseKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'sb_pub
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
+// ── Helpers de Data (Fuso Local — Manaus UTC-4, etc.) ──────────────
+// Regra GOLD: Banco SEMPRE grava datas em UTC (.toISOString).
+// Quando precisar AGUPAR / COMPARAR por DIA LOCAL (Manaus = UTC-4),
+// SEMPRE converta o timestamp UTC para a data de referência LOCAL antes.
+
+/** Converte Data → "YYYY-MM-DD" no FUSO LOCAL DO NAVEGADOR (não UTC).
+ *  Ex: 2026-07-29T02:00:00Z (UTC) → 2026-07-28 em Manaus (UTC-4). */
+export function localDateKey(dateInput: Date | string): string {
+  const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  if (isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+/** Data "YYYY-MM-DD" no fuso LOCAL → ISO UTC do 1° segundo daquele dia.
+ *  Ex: "2026-07-28" em Manaus → 2026-07-28T04:00:00.000Z */
+export function localStartOfDayToUtcIso(localDateStr: string): string {
+  if (!localDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(localDateStr)) return '';
+  const [y, m, d] = localDateStr.split('-').map(Number);
+  return new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();
+}
+
+/** Data "YYYY-MM-DD" no fuso LOCAL → ISO UTC do último ms daquele dia.
+ *  Ex: "2026-07-28" em Manaus → 2026-07-29T03:59:59.999Z */
+export function localEndOfDayToUtcIso(localDateStr: string): string {
+  if (!localDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(localDateStr)) return '';
+  const [y, m, d] = localDateStr.split('-').map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
+}
+
+/** "YYYY-MM-DD HH:MM:SS" em data LOCAL → ISO UTC equivalente.
+ *  Usado para converter valores de input do usuário em UTC p/ filtros de query. */
+export function localDateTimeToUtcIso(dateStr: string, timeStr = '00:00:00'): string {
+  const [y, m, d] = (dateStr || '').split('-').map(Number);
+  const [h, mi, s] = (timeStr || '00:00:00').split(':').map(n => parseInt(n, 10) || 0);
+  if (!y) return '';
+  return new Date(y, m - 1, d, h, mi, s, 0).toISOString();
+}
+
 // ── Tipos ──────────────────────────────────────────────────────────
 export interface SaldoEstoque {
   id?: number;
@@ -310,11 +351,7 @@ export async function getDashboardAnalytics(): Promise<DashboardData> {
 
   // Usa DATA LOCAL DO NAVEGADOR (não UTC) para bater com fusos como Manaus (UTC-4)
   // ex: 22:00 do dia 27 local = 02:00 dia 28 UTC — queremos "hoje" = dia 27
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  const todayStr = `${y}-${m}-${d}`;
+  const todayStr = localDateKey(new Date());
 
   // 1. Agrupamento por Analista (responsavel)
   const analistasMap = new Map<string, { hoje: number; total: number; tempos: number[]; timestamps: number[] }>();
@@ -328,7 +365,9 @@ export async function getDashboardAnalytics(): Promise<DashboardData> {
       const st = analistasMap.get(name)!;
       st.total += 1;
       if (item.updated_at) {
-        if (item.updated_at.startsWith(todayStr)) {
+        // ATENÇÃO: updated_at no banco está em UTC. Para comparar "hoje" com
+        // dia local Manaus, converte o timestamp UTC → chave de data local antes.
+        if (localDateKey(item.updated_at) === todayStr) {
           st.hoje += 1;
         }
         st.timestamps.push(new Date(item.updated_at).getTime());
@@ -462,8 +501,15 @@ export async function getSkusReport(
   if (modelo?.trim()) query = query.ilike('modelo', `%${modelo.trim()}%`);
   if (status?.trim()) query = query.eq('status', status.trim());
   if (responsavel?.trim()) query = query.ilike('responsavel', `%${responsavel.trim()}%`);
-  if (dataInicio) query = query.gte('data_map', dataInicio);
-  if (dataFim) query = query.lte('data_map', dataFim + ' 23:59:59');
+  // IMPORTANTE: dataInicio e dataFim chegam como "YYYY-MM-DD" no fuso LOCAL do usuário.
+  // No banco, data_map está armazenado como ISO UTC via new Date().toISOString().
+  // Precisamos converter:
+  //   dataInicio = "2026-07-28" Manaus → UTC = 2026-07-28T04:00:00.000Z  (gte)
+  //   dataFim    = "2026-07-28" Manaus → UTC = 2026-07-29T03:59:59.999Z  (lte)
+  const gte = localStartOfDayToUtcIso(dataInicio || '');
+  const lte = localEndOfDayToUtcIso(dataFim || '');
+  if (gte) query = query.gte('data_map', gte);
+  if (lte) query = query.lte('data_map', lte);
 
   query = query.range(page * pageSize, (page + 1) * pageSize - 1);
 
