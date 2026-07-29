@@ -55,6 +55,30 @@ interface CheckKDProps {
 
 type ItemComStatus = SaldoEstoque & { tp: SkuTp | null };
 
+function cmpStr(a: string, b: string): number {
+  return String(a || '').localeCompare(String(b || ''), 'pt-BR', {
+    sensitivity: 'base',
+    numeric: true,
+  });
+}
+
+function ordenarItens<T extends { descricao: string; sku: string; locacao?: string }>(arr: T[]): T[] {
+  return [...arr].sort((a, b) => {
+    const r1 = cmpStr(a.descricao, b.descricao);
+    if (r1 !== 0) return r1;
+    const r2 = cmpStr(a.sku, b.sku);
+    if (r2 !== 0) return r2;
+    if (a.locacao || b.locacao) return cmpStr(a.locacao || '', b.locacao || '');
+    return 0;
+  });
+}
+
+function ordenarLocacoes(arr: LocacaoResumo[]): LocacaoResumo[] {
+  return [...arr]
+    .map(l => ({ ...l, itens: ordenarItens(l.itens || []) }))
+    .sort((a, b) => cmpStr(a.locacao, b.locacao));
+}
+
 // ── Sub-processos do T&P ──────────────────────────────────────────
 const SUB_PROCESSOS = [
   { key: 'pegar_ik',  label: 'Pegar IK',          t1: 'pegar_ik_t1', t2: 'pegar_ik_t2', t3: 'pegar_ik_t3', res: 'pegar_ik_res' },
@@ -396,7 +420,7 @@ function ResumoLocacoesView({ onStartTimer }: CheckKDProps) {
     setError(null);
     try {
       const dados = await getResumoLocacoes();
-      setLocacoes(dados);
+      setLocacoes(ordenarLocacoes(dados));
     } catch (err: any) {
       console.error("Erro ao carregar locações:", err);
       setError("Erro ao carregar resumo de locações: " + (err.message || 'Falha na conexão'));
@@ -666,7 +690,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
         setError(`Nenhum item encontrado para a chave: ${chave}`);
         setItens(null);
       } else {
-        setItens(resultado);
+        setItens(ordenarItens(resultado));
         setLastUpdated(new Date());
       }
     } catch (err: any) {
@@ -703,7 +727,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
         try {
           const resultado = await getItensByChave(chave);
           if (resultado.length > 0) {
-            setItens(resultado);
+            setItens(ordenarItens(resultado));
             setLastUpdated(new Date());
           }
         } catch {}
@@ -722,7 +746,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
           try {
             const resultado = await getItensByChave(chave);
             if (resultado.length > 0) {
-              setItens(resultado);
+              setItens(ordenarItens(resultado));
               setLastUpdated(new Date());
             }
           } catch {}
