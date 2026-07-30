@@ -86,6 +86,8 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [syncingNow, setSyncingNow] = useState(false);
   const pollingRef = useRef<number | null>(null);
+  const searchTermRef = useRef<string>('');
+  const selectedSkuRef = useRef<string | null>(null);
 
   // Feedback de save (sucesso/erro) para o usuário
   const [saveFeedback, setSaveFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
@@ -136,6 +138,13 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
   const [infoSaved, setInfoSaved] = useState(false);
   const [confirmingMap, setConfirmingMap] = useState(false);
 
+  // ↓ Sincroniza refs com estados para evitar closures velhos no polling
+  useEffect(() => { searchTermRef.current = searchTerm; }, [searchTerm]);
+  useEffect(() => {
+    const cur = skus[selectedSkuIndex];
+    if (cur) selectedSkuRef.current = cur.sku;
+  }, [selectedSkuIndex, skus]);
+
   // Carregar SKUs e estatísticas
   useEffect(() => {
     loadData(false);
@@ -147,27 +156,30 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
     window.setTimeout(() => setSaveFeedback(null), 2800);
   };
 
-  // Polling a cada 8s para pegar atualizações de outros analistas (evita "sumiram dados")
+  // Polling a cada 15s para pegar atualizações de outros analistas (evita "sumiram dados")
+  // Aumentado de 8s → 15s: reduz ~46% requisições automáticas sem perder sincronia perceptível
   useEffect(() => {
     if (pollingRef.current) { window.clearInterval(pollingRef.current); pollingRef.current = null; }
     pollingRef.current = window.setInterval(() => {
-      loadData(true);
-    }, 8000);
+      loadDataRef.current(true);
+    }, 15000);
     return () => {
       if (pollingRef.current) { window.clearInterval(pollingRef.current); pollingRef.current = null; }
     };
   }, []);
 
+  const loadDataRef = useRef<(silent: boolean) => Promise<void>>(async () => {});
+
   const loadData = async (silent = false) => {
     if (!silent) setLoadingSkus(true);
     setSyncingNow(true);
     try {
+      const termoAtual = searchTermRef.current;
       let [list, st] = await Promise.all([
-        getSkusList(searchTerm, 100),
+        getSkusList(termoAtual, 100),
         getStatsTp()
       ]);
 
-      // Se tiver initialSku mas ele não veio nos primeiros 100 resultados, busca especificamente ele
       if (initialSku && !list.some(s => s.sku.toUpperCase() === initialSku.toUpperCase())) {
         const specific = await getSkusList(initialSku, 10);
         if (specific.length > 0) {
@@ -175,26 +187,34 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
         }
       }
 
-      // ↓ Merge inteligente: preserva o SKU atualmente selecionado, mas atualiza os valores do banco
-      // (outro analista pode ter salvo algo enquanto este cliente estava parado)
       setSkus(prevSkus => {
-        const prevBySku = new Map(prevSkus.map(s => [s.sku, s]));
-        return list.map(newS => {
-          const prev = prevBySku.get(newS.sku);
-          // Se o novo tem updated_at mais recente (ou igual), usa o novo = DADOS MAIS FRESCOS DO BANCO SEMPRE
-          return newS;
-        });
+        return list.map(newS => newS);
       });
       setStats(st);
       setLastSync(new Date());
 
-      if (!silent && initialSku && list.length > 0) {
-        const idx = list.findIndex(s => s.sku.toUpperCase() === initialSku.toUpperCase());
-        if (idx !== -1) {
-          setSelectedSkuIndex(idx);
-          setTimeout(() => {
-            rightPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }, 150);
+      // ↓ Preserva seleção: encontra o índice do SKU que estava selecionado ANTES do refresh
+      if (list.length > 0) {
+        const skuAnterior = selectedSkuRef.current;
+        let idxAlvo = -1;
+
+        if (!silent && initialSku) {
+          idxAlvo = list.findIndex(s => s.sku.toUpperCase() === initialSku.toUpperCase());
+        } else if (skuAnterior) {
+          idxAlvo = list.findIndex(s => s.sku === skuAnterior);
+        }
+
+        if (idxAlvo === -1 && !silent) {
+          idxAlvo = 0;
+        }
+
+        if (idxAlvo !== -1 && idxAlvo !== selectedSkuIndex) {
+          setSelectedSkuIndex(idxAlvo);
+          if (!silent && initialSku) {
+            setTimeout(() => {
+              rightPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 150);
+          }
         }
       }
     } catch (err) {
@@ -204,6 +224,8 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
       if (!silent) setLoadingSkus(false);
     }
   };
+
+  useEffect(() => { loadDataRef.current = loadData; }, [loadData]);
 
   const selectedSku = skus[selectedSkuIndex] || null;
 

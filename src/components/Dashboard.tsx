@@ -3,9 +3,9 @@ import { motion } from 'motion/react';
 import {
   Users, CheckCircle2, Clock, Activity, RefreshCw, Loader2,
   TrendingUp, Boxes, Play, ArrowRight, Award, Calendar,
-  Filter, X
+  Filter, X, BarChart3, ChevronDown, Search, MapPin
 } from 'lucide-react';
-import { getDashboardAnalytics, DashboardData, DashboardDateRange, localDateKey } from '../lib/supabase';
+import { getDashboardAnalytics, DashboardData, DashboardDateRange, localDateKey, TpMapBucket } from '../lib/supabase';
 
 // ── Helpers de data rápidos para os atalhos (fuso LOCAL do navegador = Manaus)
 function addDays(d: Date, days: number): Date {
@@ -32,15 +32,24 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
     modelos: [],
     periodLabel: null,
     periodTotalItems: 0,
+    tpMapDistribution: [],
+    mappingDates: [],
   });
 
   const [startDate, setStartDate] = useState<string>('');
   const [endDate,   setEndDate]   = useState<string>('');
   const [activePreset, setActivePreset] = useState<PresetKey>('all');
+  // ⬇️ NOVO: Data exata de mapeamento selecionada (YYYY-MM-DD | '')
+  // Usado para filtrar por UM dia específico em que itens foram MAREADOS.
+  const [exactMappingDate, setExactMappingDate] = useState<string>('');
+  const [dateDropdownOpen, setDateDropdownOpen] = useState<boolean>(false);
+  const [dateFilterQuery, setDateFilterQuery] = useState<string>('');
 
   const applyPreset = (key: PresetKey) => {
     setActivePreset(key);
     const today = localDateKey(new Date());
+    // Presets limpam o filtro de dia exato de mapeamento (são fluxos separados)
+    setExactMappingDate('');
     switch (key) {
       case 'all':
         setStartDate(''); setEndDate('');
@@ -69,7 +78,12 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
   const loadData = async (range?: DashboardDateRange) => {
     setLoading(true);
     try {
-      const result = await getDashboardAnalytics(range);
+      // Prioridade: filtro de dia exato de mapeamento (override no range de datas)
+      let finalRange = range || { startDate: startDate || undefined, endDate: endDate || undefined };
+      if (exactMappingDate) {
+        finalRange = { startDate: exactMappingDate, endDate: exactMappingDate };
+      }
+      const result = await getDashboardAnalytics(finalRange);
       setData(result);
     } catch (err) {
       console.error('Erro ao carregar métricas:', err);
@@ -79,13 +93,20 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
   };
 
   useEffect(() => {
+    // Se o usuário escolher um dia exato de mapeamento → força start/end = esse dia.
+    // Caso contrário, usa start/end normais.
     const range: DashboardDateRange = {};
-    if (startDate) range.startDate = startDate;
-    if (endDate)   range.endDate   = endDate;
+    if (exactMappingDate) {
+      range.startDate = exactMappingDate;
+      range.endDate   = exactMappingDate;
+    } else {
+      if (startDate) range.startDate = startDate;
+      if (endDate)   range.endDate   = endDate;
+    }
     loadData(range);
-  }, [startDate, endDate]);
+  }, [startDate, endDate, exactMappingDate]);
 
-  const clearFilter = () => applyPreset('all');
+  const clearFilter = () => { setExactMappingDate(''); setDateFilterQuery(''); applyPreset('all'); };
 
   const percentConcluido = data.stats.total > 0
     ? Number(((data.stats.concluidos / data.stats.total) * 100).toFixed(1))
@@ -100,12 +121,29 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
     );
   }
 
-  const hasFilter = !!startDate || !!endDate;
+  const hasFilter = !!startDate || !!endDate || !!exactMappingDate;
   const fmtPtBr = (d: string) => {
     if (!d) return '';
     const [y, m, dd] = d.split('-');
     return `${dd}/${m}/${y}`;
   };
+  const diaDaSemanaPt = (d: string) => {
+    if (!d) return '';
+    const [y, m, dd] = d.split('-').map(Number);
+    const dw = new Date(y, (m||1) - 1, dd || 1).getDay();
+    return ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dw] || '';
+  };
+
+  // Filtra datas do dropdown por busca textual (dd/mm ou dia da semana)
+  const filteredMappingDates = (() => {
+    if (!dateFilterQuery.trim()) return data.mappingDates;
+    const q = dateFilterQuery.trim().toLowerCase();
+    return data.mappingDates.filter(md => {
+      const pt = fmtPtBr(md.data);
+      const dw = diaDaSemanaPt(md.data).toLowerCase();
+      return pt.includes(q) || md.data.includes(q) || dw.includes(q);
+    });
+  })();
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
@@ -185,11 +223,114 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
                 value={endDate}
                 min={startDate || ''}
                 max={localDateKey(new Date())}
-                onChange={(e) => { setActivePreset('all'); setEndDate(e.target.value); }}
+                onChange={(e) => { setActivePreset('all'); setExactMappingDate(''); setEndDate(e.target.value); }}
                 className="pl-8 pr-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-xs font-bold text-slate-700 w-[145px]"
               />
             </div>
           </label>
+
+          {/* ⬇️ NOVO: Seletor de DIA EXATO DE MAPEAMENTO (pesquisável) */}
+          <div className="relative">
+            <label className="flex flex-col gap-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+              Filtrar por Dia do Mapeamento
+              <button
+                type="button"
+                onClick={() => setDateDropdownOpen(v => !v)}
+                className={`relative w-[240px] text-left pl-3 pr-8 py-1.5 rounded-lg border transition-all text-xs font-bold flex items-center justify-between ${
+                  exactMappingDate
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                    : 'bg-slate-50 border-slate-200 hover:bg-white text-slate-600 focus:border-blue-500'
+                }`}
+              >
+                {exactMappingDate ? (
+                  <span className="flex items-center gap-2 truncate">
+                    <MapPin className="w-3.5 h-3.5" />
+                    {fmtPtBr(exactMappingDate)} · {diaDaSemanaPt(exactMappingDate)}
+                  </span>
+                ) : (
+                  <span className="truncate text-slate-400">Selecionar dia do mapeamento…</span>
+                )}
+                <ChevronDown className={`w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 transition-transform ${dateDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+            </label>
+
+            {dateDropdownOpen && (
+              <>
+                {/* Backdrop para fechar dropdown ao clicar fora */}
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setDateDropdownOpen(false)}
+                />
+                <div className="absolute z-20 right-0 mt-2 w-[280px] bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+                  {/* Caixa de busca */}
+                  <div className="p-2 border-b border-slate-100 bg-slate-50/70">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Buscar: dd/mm ou dia semana (seg/ter)…"
+                        value={dateFilterQuery}
+                        onChange={(e) => setDateFilterQuery(e.target.value)}
+                        className="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-bold text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  {/* Lista de opções */}
+                  <div className="max-h-72 overflow-y-auto">
+                    {data.mappingDates.length === 0 ? (
+                      <div className="p-4 text-center">
+                        <p className="text-xs font-bold text-slate-400">
+                          Nenhum item mapeado ainda.
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          Realize um mapeamento para que as datas apareçam aqui.
+                        </p>
+                      </div>
+                    ) : filteredMappingDates.length === 0 ? (
+                      <div className="p-4 text-center">
+                        <p className="text-xs font-bold text-slate-400">
+                          Nenhuma data encontrada com esse filtro.
+                        </p>
+                      </div>
+                    ) : (
+                      filteredMappingDates.map(md => {
+                        const ativo = md.data === exactMappingDate;
+                        return (
+                          <button
+                            key={md.data}
+                            type="button"
+                            onClick={() => {
+                              setExactMappingDate(ativo ? '' : md.data);
+                              setActivePreset('all');
+                              setStartDate('');
+                              setEndDate('');
+                              setDateDropdownOpen(false);
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-2 text-left text-xs transition-colors border-b border-slate-50 last:border-b-0 ${
+                              ativo
+                                ? 'bg-emerald-50 text-emerald-700 font-black'
+                                : 'hover:bg-slate-50 text-slate-700 font-semibold'
+                            }`}
+                          >
+                            <span className="flex items-center gap-2">
+                              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                              {fmtPtBr(md.data)} · <span className="text-slate-500">{diaDaSemanaPt(md.data)}</span>
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                              ativo ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-500'
+                            }`}>
+                              {md.quantidade} itens
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
 
           {hasFilter && (
             <button
@@ -254,6 +395,173 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
             <p className="text-2xl font-black text-slate-700 font-mono leading-tight">{data.stats.pendentes.toLocaleString()}</p>
           </div>
         </div>
+      </div>
+
+      {/* ── SEÇÃO 0.5: GRÁFICO DE DISTRIBUIÇÃO tp_map
+           Mostra QUANTOS itens mapeados têm N dias úteis desde que foram finalizados.
+           Ajuda a verificar se itens recentes estão se acumulando ou precisam de re-trabalho. */}
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <BarChart3 className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-black text-slate-800 tracking-tight">
+                Envelhecimento dos Itens Mapeados
+              </h2>
+              <p className="text-xs text-slate-400">
+                Distribuição por dias úteis desde a conclusão do mapeamento (tp_map).
+                {exactMappingDate && (
+                  <span className="ml-1 inline-flex items-center text-emerald-600 font-bold">
+                    (Filtrado por dia do mapeamento)
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+
+          {(() => {
+            // Totais rápidos do gráfico para a direita
+            const totalMapeados = data.tpMapDistribution.reduce((s, b) => s + b.quantidade, 0);
+            const hoje = data.tpMapDistribution[0]?.quantidade || 0;
+            const novos7 = data.tpMapDistribution.slice(0, 7).reduce((s, b) => s + b.quantidade, 0);
+            const velhos = (data.tpMapDistribution[30]?.quantidade || 0);
+            return (
+              <div className="flex gap-2 flex-wrap">
+                <div className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-center">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">
+                    Total
+                  </span>
+                  <span className="text-sm font-black text-slate-800 font-mono">{totalMapeados}</span>
+                </div>
+                <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2 text-center">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600 block">
+                    Hoje
+                  </span>
+                  <span className="text-sm font-black text-emerald-700 font-mono">{hoje}</span>
+                </div>
+                <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-center">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-blue-600 block">
+                    ≤ 7 dias
+                  </span>
+                  <span className="text-sm font-black text-blue-700 font-mono">{novos7}</span>
+                </div>
+                <div className="bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 text-center">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-amber-600 block">
+                    30+ dias
+                  </span>
+                  <span className="text-sm font-black text-amber-700 font-mono">{velhos}</span>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
+        {(() => {
+          const dados = data.tpMapDistribution;
+          const totalBars = dados.reduce((s, b) => s + b.quantidade, 0);
+          if (totalBars === 0) {
+            return (
+              <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl">
+                <BarChart3 className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm font-bold text-slate-500">
+                  {exactMappingDate ? 'Nenhum item mapeado nesse dia' : 'Nenhum item concluído ainda para exibir'}
+                </p>
+                <p className="text-xs text-slate-400">
+                  Itens mapeados aparecerão aqui distribuídos por quantidade de dias úteis desde seu fechamento.
+                </p>
+              </div>
+            );
+          }
+          // Calcula barra mais alta para normalizar alturas
+          const maxQty = Math.max(...dados.map(b => b.quantidade), 1);
+          // Exibe apenas os buckets que tiverem atividade, + 2 de contexto (ou todos até 15)
+          const temDado = dados.map(b => b.quantidade > 0);
+          const ultimoIdx = (() => {
+            let last = 0;
+            temDado.forEach((tem, i) => { if (tem) last = i; });
+            return Math.max(last + 2, 7); // pelo menos 7 primeiros buckets
+          })();
+          const exibir = dados.slice(0, Math.min(ultimoIdx + 1, dados.length));
+
+          return (
+            <div>
+              {/* Área do gráfico */}
+              <div className="relative bg-slate-50/50 rounded-2xl p-4 border border-slate-100 overflow-hidden">
+                {/* Grid horizontal de fundo */}
+                <div className="absolute inset-4 pointer-events-none">
+                  {[0.25, 0.5, 0.75, 1].map(pct => (
+                    <div
+                      key={pct}
+                      className="absolute left-0 right-0 border-t border-dashed border-slate-200"
+                      style={{ bottom: `${pct * 100}%` }}
+                    />
+                  ))}
+                </div>
+                <div className="flex items-end justify-around gap-1 relative h-[240px]">
+                  {exibir.map((bucket, i) => {
+                    const hPct = (bucket.quantidade / maxQty) * 100;
+                    const isHoje = bucket.dias === 0;
+                    const isVelho = bucket.dias >= 30;
+                    const destaque = isHoje || isVelho || bucket.quantidade === maxQty;
+                    return (
+                      <motion.div
+                        key={bucket.dias}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.03 * i }}
+                        className="flex flex-col items-center justify-end flex-1 max-w-[44px] min-w-[28px] h-full group"
+                      >
+                        {/* Popover com quantidade */}
+                        <div className="mb-1 px-1.5 py-0.5 rounded text-[9px] font-black text-white bg-slate-800 opacity-0 group-hover:opacity-100 transition-all whitespace-nowrap translate-y-1 group-hover:translate-y-0">
+                          {bucket.quantidade} itens
+                        </div>
+                        {/* Barra */}
+                        <div
+                          className={`w-full rounded-t-lg transition-all shadow-sm ${
+                            isHoje ? 'bg-gradient-to-b from-emerald-500 to-emerald-600'
+                              : isVelho ? 'bg-gradient-to-b from-amber-500 to-amber-600'
+                              : destaque ? 'bg-gradient-to-b from-blue-500 to-blue-600'
+                              : 'bg-gradient-to-b from-slate-400/80 to-slate-500/80'
+                          } ${destaque ? 'ring-2 ring-offset-1 ring-slate-200' : ''}`}
+                          style={{
+                            height: hPct < 3 && bucket.quantidade > 0 ? '3px' : `${hPct}%`,
+                            minHeight: bucket.quantidade > 0 ? '2px' : '0px',
+                          }}
+                          title={`${bucket.label}: ${bucket.quantidade} itens`}
+                        />
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* Rótulos (eixo X) */}
+              <div className="flex items-stretch justify-around gap-1 mt-2">
+                {exibir.map(bucket => {
+                  const isHoje = bucket.dias === 0;
+                  const isVelho = bucket.dias >= 30;
+                  return (
+                    <div
+                      key={bucket.dias + '-x'}
+                      className={`flex-1 max-w-[44px] min-w-[28px] text-center truncate ${
+                        isHoje ? 'text-emerald-700' : isVelho ? 'text-amber-700' : 'text-slate-500'
+                      } font-black text-[9px]`}
+                      title={bucket.label}
+                    >
+                      {bucket.dias === 0 ? '0' : isVelho ? '30+' : String(bucket.dias)}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-center justify-between mt-1 px-2 text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                <span>Recentes ⬅️</span>
+                <span>Dias úteis desde o mapeamento (tp_map)</span>
+                <span>➡️ Antigos</span>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── SEÇÃO 1: PRODUTIVIDADE POR ANALISTA ── */}

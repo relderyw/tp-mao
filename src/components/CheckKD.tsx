@@ -737,7 +737,8 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
     }
   }, [mappingDirtyCounter, chaveAtual]);
 
-  // 2) Polling leve a cada 12s — atualiza o KD atual em silêncio (evita precisar de F5)
+  // 2) Polling leve a cada 20s — atualiza o KD atual em silêncio (evita precisar de F5)
+  // Aumentado de 12s → 20s: reduz ~40% requisições; o dado do KD é estável
   useEffect(() => {
     if (kdPollingRef.current) { window.clearInterval(kdPollingRef.current); kdPollingRef.current = null; }
 
@@ -757,7 +758,7 @@ export default function CheckKD({ onStartTimer, mappingDirtyCounter = 0 }: Check
       if (mainTab === 'locacao') {
         // Também atualiza a aba de locações em silêncio periodicamente
       }
-    }, 12000);
+    }, 20000);
 
     return () => {
       if (kdPollingRef.current) { window.clearInterval(kdPollingRef.current); kdPollingRef.current = null; }
