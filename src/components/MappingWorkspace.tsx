@@ -134,6 +134,17 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
     form_unid: '' as string,
     form_qtd: '' as string,
   });
+  // ⬇️ NOVO: Dirty flags por campo de itemInfo — preserva valores editados locais contra polling/sync
+  // true = usuário digitou algo localmente e NÃO SALVOU ainda; polling não pode sobrescrever.
+  const dirtyItemInfoRef = useRef<Record<keyof typeof itemInfoSavedRef.current, boolean>>({
+    pecas_kd: false, tp_emb_forn: false, pd_emb_forn: false, tp_emb_dcc: false,
+    pd_emb_dcc: false, carro: false, form_unid: false, form_qtd: false,
+  });
+  // ⬇️ NOVO: Dirty flags para QTD (por processo) — polling não apaga valores locais
+  const dirtyProcessQtdRef = useRef<Record<string, boolean>>({});
+  // ⬇️ NOVO: Qual é o SKU atualmente no itemInfo? Quando trocar → reseta tudo
+  const loadedSkuForItemInfoRef = useRef<string | null>(null);
+
   const [savingInfo, setSavingInfo] = useState(false);
   const [infoSaved, setInfoSaved] = useState(false);
   const [confirmingMap, setConfirmingMap] = useState(false);
@@ -228,10 +239,45 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
   useEffect(() => { loadDataRef.current = loadData; }, [loadData]);
 
   const selectedSku = skus[selectedSkuIndex] || null;
+  const selectedSkuCode = selectedSku?.sku ?? null;
 
-  // Sincroniza itemInfo e processQtd quando troca de SKU
+  // ═══════════════════════════════════════════════════════════════
+  // 🆕 LISTA VISÍVEL: só itens pendentes ou em andamento.
+  //     Itens "mapeado" (concluído) NÃO aparecem mais.
+  //     (Se o usuário pesquisar explicitamente por um SKU mapeado
+  //      usando initialSku ou estiver com item mapeado selecionado,
+  //      esse item específico ainda fica acessível.)
+  // ═══════════════════════════════════════════════════════════════
+  const skusVisiveis = (() => {
+    // Sempre preserva o SKU atualmente selecionado (mesmo que seja mapeado)
+    // para não desaparecer da tela enquanto o usuário o está editando.
+    const selSku = selectedSkuCode;
+    return skus.filter(s => s.status !== 'mapeado' || (selSku && s.sku === selSku));
+  })();
+
+  // Mapeamento reverso: índice no array skus → índice em skusVisiveis (para seleção correta)
+  const findVisIndexFromSkus = (fullIdx: number): number => {
+    const skuAlvo = skus[fullIdx]?.sku;
+    if (!skuAlvo) return 0;
+    return Math.max(0, skusVisiveis.findIndex(s => s.sku === skuAlvo));
+  };
+  const findFullIndexFromVis = (visIdx: number): number => {
+    const skuAlvo = skusVisiveis[visIdx]?.sku;
+    if (!skuAlvo) return 0;
+    return Math.max(0, skus.findIndex(s => s.sku === skuAlvo));
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  // Sincroniza itemInfo / processQtd SOMENTE quando TROCAR DE SKU.
+  // ANTES: dependia de [selectedSkuIndex, skus] → rodava em TODO polling
+  //        (apagava valores que usuário digitou e não salvou!)
+  // DEPOIS: depende só de [selectedSkuCode] → só quando muda o item.
+  // ═══════════════════════════════════════════════════════════════
   useEffect(() => {
-    if (selectedSku) {
+    if (!selectedSku) return;
+
+    // Caso 1: é UM SKU NOVO (diferente do carregado agora) → reset TOTAL de tudo
+    if (loadedSkuForItemInfoRef.current !== selectedSku.sku) {
       const newInfo = {
         pecas_kd: selectedSku.pecas_kd != null ? String(selectedSku.pecas_kd) : '',
         tp_emb_forn: selectedSku.tp_emb_forn || '',
@@ -244,6 +290,10 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
       };
       setItemInfo(newInfo);
       itemInfoSavedRef.current = { ...newInfo };
+      // Reseta TODAS as dirty flags: é um item novo, nada foi editado ainda
+      (Object.keys(dirtyItemInfoRef.current) as Array<keyof typeof itemInfoSavedRef.current>)
+        .forEach(k => { dirtyItemInfoRef.current[k] = false; });
+
       // Sincroniza QTD de cada processo com o valor do banco
       const qtdMap: Record<string, string> = {};
       PROCESS_CONFIGS.forEach(proc => {
@@ -251,9 +301,68 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
         qtdMap[proc.id] = dbVal != null ? String(dbVal) : '';
       });
       setProcessQtd(qtdMap);
+      // Reseta dirty flags de QTD p/ item novo
+      dirtyProcessQtdRef.current = {};
+
+      loadedSkuForItemInfoRef.current = selectedSku.sku;
       setInfoSaved(false);
+      return;
     }
-  }, [selectedSkuIndex, skus]);
+
+    // ═══════════════════════════════════════════════════════════
+    // Caso 2: É O MESMO SKU! Polling atualizou os dados do banco.
+    // → FAZEMOS MERGE INTELIGENTE:
+    //   • Campo que USUÁRIO EDITOU LOCALMENTE (dirty=true) → PRESERVA
+    //   • Campo que USUÁRIO NÃO TOCOU → atualiza com valor do banco
+    // ═══════════════════════════════════════════════════════════
+    setItemInfo(prev => {
+      let changed = false;
+      const merged = { ...prev };
+      const mergedSaved = { ...itemInfoSavedRef.current };
+      // Banco
+      const banco = {
+        pecas_kd: selectedSku.pecas_kd != null ? String(selectedSku.pecas_kd) : '',
+        tp_emb_forn: selectedSku.tp_emb_forn || '',
+        pd_emb_forn: selectedSku.pd_emb_forn || '',
+        tp_emb_dcc: selectedSku.tp_emb_dcc || '',
+        pd_emb_dcc: selectedSku.pd_emb_dcc || '',
+        carro: selectedSku.carro || '',
+        form_unid: selectedSku.form_unid || '',
+        form_qtd: selectedSku.form_qtd != null ? String(selectedSku.form_qtd) : '',
+      };
+      (Object.keys(prev) as Array<keyof typeof prev>).forEach(k => {
+        // Se usuário não editou esse campo → traz valor novo do banco
+        if (!dirtyItemInfoRef.current[k]) {
+          const dbV = (banco as any)[k];
+          if (merged[k] !== dbV) { merged[k] = dbV; changed = true; }
+          if (mergedSaved[k] !== dbV) { mergedSaved[k] = dbV; }
+        }
+      });
+      if (changed) {
+        itemInfoSavedRef.current = mergedSaved;
+        return merged;
+      }
+      itemInfoSavedRef.current = mergedSaved;
+      return prev;
+    });
+
+    // Mesmo MERGE para QTD dos processos
+    setProcessQtd(prev => {
+      let changed = false;
+      const merged = { ...prev };
+      PROCESS_CONFIGS.forEach(proc => {
+        const dbVal = (selectedSku as any)[proc.qtdKey];
+        const dbStr = dbVal != null ? String(dbVal) : '';
+        if (!dirtyProcessQtdRef.current[proc.id]) {
+          if ((merged[proc.id] || '') !== dbStr) {
+            merged[proc.id] = dbStr;
+            changed = true;
+          }
+        }
+      });
+      return changed ? merged : prev;
+    });
+  }, [selectedSkuCode]); // 👈 ÚNICA dependência: o SKU do item! NÃO o array skus.
 
   // Compara itemInfo atual com o último salvo para detectar mudanças
   const itemInfoIsDirty = (): boolean => {
@@ -269,6 +378,25 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
       cur.form_unid !== sav.form_unid ||
       cur.form_qtd !== sav.form_qtd
     );
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  // Helper: LIMPAR dirty flags (após saves bem-sucedidos)
+  // Se não passar nada → limpa tudo do item atual.
+  // Se passar tipo → limpa apenas um conjunto (info ou qtd de 1 processo).
+  // ═══════════════════════════════════════════════════════════════
+  const clearDirtyFlags = (opts?: { only?: 'item-info' | 'process-qtd'; processId?: string }) => {
+    if (!opts || opts.only === 'item-info') {
+      (Object.keys(dirtyItemInfoRef.current) as Array<keyof typeof itemInfoSavedRef.current>)
+        .forEach(k => { dirtyItemInfoRef.current[k] = false; });
+    }
+    if (!opts || opts.only === 'process-qtd') {
+      if (opts?.processId) {
+        delete dirtyProcessQtdRef.current[opts.processId];
+      } else {
+        dirtyProcessQtdRef.current = {};
+      }
+    }
   };
 
   // Salva os campos adicionais do item
@@ -291,6 +419,8 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
       newSkus[selectedSkuIndex] = updated;
       setSkus(newSkus);
       itemInfoSavedRef.current = { ...itemInfo };
+      // Salvo no banco → campos não estão mais "sujos" (local = banco)
+      clearDirtyFlags({ only: 'item-info' });
       setInfoSaved(true);
       setTimeout(() => setInfoSaved(false), 2000);
       setSavingInfo(false);
@@ -350,16 +480,19 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
 
   // Trocar de SKU (setas ← →)
   const handlePrevSku = () => {
-    if (selectedSkuIndex > 0) {
-      setSelectedSkuIndex(selectedSkuIndex - 1);
+    // Navega apenas nos itens visíveis (pendente/andamento)
+    const visIdx = findVisIndexFromSkus(selectedSkuIndex);
+    if (visIdx > 0) {
+      setSelectedSkuIndex(findFullIndexFromVis(visIdx - 1));
       resetTimer();
       scrollToPanel();
     }
   };
 
   const handleNextSku = () => {
-    if (selectedSkuIndex < skus.length - 1) {
-      setSelectedSkuIndex(selectedSkuIndex + 1);
+    const visIdx = findVisIndexFromSkus(selectedSkuIndex);
+    if (visIdx < skusVisiveis.length - 1) {
+      setSelectedSkuIndex(findFullIndexFromVis(visIdx + 1));
       resetTimer();
       scrollToPanel();
     }
@@ -401,6 +534,8 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
       setStats(await getStatsTp());
       onMappingSaved?.();
       showFeedback('success', `✓ ${procConfig.title}: tomada gravada (${timeToRecord.toFixed(2)}s)`);
+      // Qtd e tempo salvos no banco → limpar dirty flag DESTE processo apenas
+      clearDirtyFlags({ only: 'process-qtd', processId: procConfig.id });
 
       // Verifica se completou as 5 tomadas desse sub-processo -> avança pro próximo sub-processo!
       const countRecorded = [
@@ -465,6 +600,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
       setStats(await getStatsTp());
       onMappingSaved?.();
       showFeedback('success', `Tomada ${slot}T apagada. Média de "${procConfig.title}" recalculada.`);
+      clearDirtyFlags({ only: 'process-qtd', processId: procConfig.id });
     } else {
       showFeedback('error', `Falha ao apagar tomada ${slot}T. Tente novamente.`);
     }
@@ -547,6 +683,8 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
       setStats(await getStatsTp());
       onMappingSaved?.();
       showFeedback('success', `✓ SKU ${selectedSku.sku} confirmado como MAREADO!`);
+      // Item concluído: zera dirty flags de todos os campos
+      clearDirtyFlags();
     } else {
       showFeedback('error', `✗ Falha ao confirmar mapeamento do SKU ${selectedSku.sku}.`);
     }
@@ -576,6 +714,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
       resetTimer();
       onMappingSaved?.();
       showFeedback('success', `Todas as 5 tomadas de "${procConfig.title}" foram apagadas.`);
+      clearDirtyFlags({ only: 'process-qtd', processId: procConfig.id });
     } else {
       showFeedback('error', `Falha ao apagar tomadas de "${procConfig.title}". Tente novamente.`);
     }
@@ -678,13 +817,16 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                 <Loader2 className="w-6 h-6 animate-spin text-orange-500 mr-2" />
                 <span>Carregando SKUs...</span>
               </div>
-            ) : skus.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 text-xs font-semibold">
-                Nenhum SKU encontrado
+            ) : skusVisiveis.length === 0 ? (
+              <div className="text-center py-12 text-slate-500 text-xs font-semibold space-y-2">
+                <p className="text-sm font-black text-emerald-400">🎉 TODOS os itens desta busca foram MAREADOS!</p>
+                <p>Exibindo apenas Pendentes / Em Andamento.</p>
+                <p className="text-[10px] text-slate-600">Mude a busca no campo acima ou aguarde novas importações de saldo.</p>
               </div>
             ) : (
-              skus.map((skuItem, idx) => {
-                const isSelected = idx === selectedSkuIndex;
+              skusVisiveis.map((skuItem) => {
+                const idxCompleto = skus.findIndex(s => s.sku === skuItem.sku);
+                const isSelected = idxCompleto === selectedSkuIndex;
                 const statusColor =
                   skuItem.status === 'mapeado' ? 'bg-emerald-500' :
                   skuItem.status === 'andamento' ? 'bg-orange-500' : 'bg-slate-600';
@@ -692,7 +834,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                 return (
                   <button
                     key={skuItem.sku}
-                    onClick={() => { setSelectedSkuIndex(idx); resetTimer(); scrollToPanel(); }}
+                    onClick={() => { setSelectedSkuIndex(idxCompleto); resetTimer(); scrollToPanel(); }}
                     className={`w-full text-left p-3.5 rounded-2xl border transition-all flex items-center justify-between group ${
                       isSelected
                         ? 'bg-[#252a36] border-orange-500 shadow-lg shadow-orange-500/10'
@@ -777,7 +919,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                     <input
                       type="number"
                       value={itemInfo.pecas_kd}
-                      onChange={e => setItemInfo(p => ({ ...p, pecas_kd: e.target.value }))}
+                      onChange={e => { dirtyItemInfoRef.current.pecas_kd = true; setItemInfo(p => ({ ...p, pecas_kd: e.target.value })); }}
                       placeholder="0"
                       className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-orange-500 transition-colors font-mono"
                     />
@@ -787,7 +929,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                     <input
                       type="text"
                       value={itemInfo.tp_emb_forn}
-                      onChange={e => setItemInfo(p => ({ ...p, tp_emb_forn: e.target.value }))}
+                      onChange={e => { dirtyItemInfoRef.current.tp_emb_forn = true; setItemInfo(p => ({ ...p, tp_emb_forn: e.target.value })); }}
                       placeholder="Tipo..."
                       className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-orange-500 transition-colors"
                     />
@@ -797,7 +939,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                     <input
                       type="text"
                       value={itemInfo.pd_emb_forn}
-                      onChange={e => setItemInfo(p => ({ ...p, pd_emb_forn: e.target.value }))}
+                      onChange={e => { dirtyItemInfoRef.current.pd_emb_forn = true; setItemInfo(p => ({ ...p, pd_emb_forn: e.target.value })); }}
                       placeholder="Padrão..."
                       className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-orange-500 transition-colors"
                     />
@@ -813,7 +955,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                     <label className="text-[10px] text-slate-500 font-bold block mb-1">TP_Emb DCC</label>
                     <select
                       value={itemInfo.tp_emb_dcc}
-                      onChange={e => setItemInfo(p => ({ ...p, tp_emb_dcc: e.target.value }))}
+                      onChange={e => { dirtyItemInfoRef.current.tp_emb_dcc = true; setItemInfo(p => ({ ...p, tp_emb_dcc: e.target.value })); }}
                       className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-orange-500 transition-colors appearance-none cursor-pointer"
                     >
                       <option value="">Selecionar...</option>
@@ -827,7 +969,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                     <input
                       type="text"
                       value={itemInfo.pd_emb_dcc}
-                      onChange={e => setItemInfo(p => ({ ...p, pd_emb_dcc: e.target.value }))}
+                      onChange={e => { dirtyItemInfoRef.current.pd_emb_dcc = true; setItemInfo(p => ({ ...p, pd_emb_dcc: e.target.value })); }}
                       placeholder="Padrão..."
                       className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-orange-500 transition-colors"
                     />
@@ -837,7 +979,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                     <input
                       type="text"
                       value={itemInfo.carro}
-                      onChange={e => setItemInfo(p => ({ ...p, carro: e.target.value }))}
+                      onChange={e => { dirtyItemInfoRef.current.carro = true; setItemInfo(p => ({ ...p, carro: e.target.value })); }}
                       placeholder="Carro..."
                       className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-orange-500 transition-colors"
                     />
@@ -853,7 +995,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                     <label className="text-[10px] text-slate-500 font-bold block mb-1">Uni. Med.</label>
                     <select
                       value={itemInfo.form_unid}
-                      onChange={e => setItemInfo(p => ({ ...p, form_unid: e.target.value }))}
+                      onChange={e => { dirtyItemInfoRef.current.form_unid = true; setItemInfo(p => ({ ...p, form_unid: e.target.value })); }}
                       className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 transition-colors appearance-none cursor-pointer"
                     >
                       <option value="">Selecionar...</option>
@@ -867,7 +1009,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                     <input
                       type="number"
                       value={itemInfo.form_qtd}
-                      onChange={e => setItemInfo(p => ({ ...p, form_qtd: e.target.value }))}
+                      onChange={e => { dirtyItemInfoRef.current.form_qtd = true; setItemInfo(p => ({ ...p, form_qtd: e.target.value })); }}
                       placeholder="0"
                       className="w-full bg-[#1e222d] border border-slate-700/70 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-emerald-500 transition-colors font-mono"
                     />
@@ -972,7 +1114,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                           type="number"
                           min="0"
                           value={processQtd[proc.id] || ''}
-                          onChange={e => setProcessQtd(prev => ({ ...prev, [proc.id]: e.target.value }))}
+                          onChange={e => { dirtyProcessQtdRef.current[proc.id] = true; setProcessQtd(prev => ({ ...prev, [proc.id]: e.target.value })); }}
                           placeholder="Ex: 25"
                           className="flex-1 bg-[#111319] border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm font-mono font-bold placeholder-slate-600 focus:border-orange-500/50 focus:outline-none transition-colors text-center"
                         />
