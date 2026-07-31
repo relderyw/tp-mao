@@ -242,20 +242,14 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
   const selectedSkuCode = selectedSku?.sku ?? null;
 
   // ═══════════════════════════════════════════════════════════════
-  // 🆕 LISTA VISÍVEL: só itens pendentes ou em andamento.
-  //     Itens "mapeado" (concluído) NÃO aparecem mais.
-  //     (Se o usuário pesquisar explicitamente por um SKU mapeado
-  //      usando initialSku ou estiver com item mapeado selecionado,
-  //      esse item específico ainda fica acessível.)
+  // 🆕 LISTA VISÍVEL: SOMENTE itens pendentes OU em andamento.
+  //     Itens "mapeado" (concluído) NUNCA aparecem na lista.
+  //     (Se o usuário confirmar mapeamento, seleção pula automaticamente
+  //      para o próximo item pendente logo abaixo.)
   // ═══════════════════════════════════════════════════════════════
-  const skusVisiveis = (() => {
-    // Sempre preserva o SKU atualmente selecionado (mesmo que seja mapeado)
-    // para não desaparecer da tela enquanto o usuário o está editando.
-    const selSku = selectedSkuCode;
-    return skus.filter(s => s.status !== 'mapeado' || (selSku && s.sku === selSku));
-  })();
+  const skusVisiveis = skus.filter(s => s.status !== 'mapeado');
 
-  // Mapeamento reverso: índice no array skus → índice em skusVisiveis (para seleção correta)
+  // Mapeamento reverso: índice no array skus → índice em skusVisiveis
   const findVisIndexFromSkus = (fullIdx: number): number => {
     const skuAlvo = skus[fullIdx]?.sku;
     if (!skuAlvo) return 0;
@@ -266,6 +260,21 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
     if (!skuAlvo) return 0;
     return Math.max(0, skus.findIndex(s => s.sku === skuAlvo));
   };
+
+  // ⬇️ NOVO: SEMPRE que o item selecionado ficar com status "mapeado"
+  //         (depois de confirmar mapeamento, ou por polling por outro analista),
+  //         pula AUTO para o primeiro item visível restante.
+  useEffect(() => {
+    const sel = skus[selectedSkuIndex];
+    if (sel && sel.status === 'mapeado') {
+      // Se existe item visível → seleciona; senão volta para 0 (trata empty state)
+      const proximo = skusVisiveis[0]
+        ? Math.max(0, skus.findIndex(s => s.sku === skusVisiveis[0].sku))
+        : 0;
+      setSelectedSkuIndex(proximo);
+      resetTimer();
+    }
+  }, [skus, selectedSkuIndex]);
 
   // ═══════════════════════════════════════════════════════════════
   // Sincroniza itemInfo / processQtd SOMENTE quando TROCAR DE SKU.

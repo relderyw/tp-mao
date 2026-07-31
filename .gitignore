@@ -6,3 +6,17 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Dados empresariais (nunca versionar!)
+*.xls
+*.xlsx
+*.xlsb
+*.csv
+scratch/
+mapping*.json
+metadata.json
+check_data.*
+check_sheets.*
+seed_data.*
+test_seed.*
+server.*

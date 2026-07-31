@@ -45,21 +45,9 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
   const [dateDropdownOpen, setDateDropdownOpen] = useState<boolean>(false);
   const [dateFilterQuery, setDateFilterQuery] = useState<string>('');
 
-  // ⬇️ NOVO: Accordion dos analistas — quais estão expandidos (por nome).
-  // Inicia com TODOS abertos. Mantém estado quando a lista muda (preserva escolhas).
-  const [analistasAbertos, setAnalistasAbertos] = useState<Set<string>>(new Set());
-  useEffect(() => {
-    setAnalistasAbertos(prev => {
-      const next = new Set(prev);
-      data.analistas.forEach(a => {
-        if (data.analistas.length > 0) {
-          // Primeira renderização: todos abertos; depois mantém seleção
-          if (prev.size === 0) next.add(a.nome);
-        }
-      });
-      return next;
-    });
-  }, [data.analistas.map(a => a.nome).join('|')]);
+  // ⬇️ NOVO: Accordion DA SEÇÃO INTEIRA de Analistas (1 única toggle para todos os cards).
+  // Padrão: ABERTO (mostra Tempo Médio + Ritmo em cada card).
+  const [secaoAnalistasAberta, setSecaoAnalistasAberta] = useState<boolean>(true);
 
   const applyPreset = (key: PresetKey) => {
     setActivePreset(key);
@@ -581,13 +569,18 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
       </div>
 
       {/* ── SEÇÃO 1: PRODUTIVIDADE POR ANALISTA ── */}
-      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-4">
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-4 overflow-hidden">
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
-              <Users className="w-5 h-5" />
-            </div>
-            <div>
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => setSecaoAnalistasAberta(v => !v)}
+              className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-100 transition-colors shrink-0 group"
+              title={secaoAnalistasAberta ? 'Recolher seção de Analistas' : 'Expandir seção de Analistas'}
+            >
+              <Users className={`w-5 h-5 transition-transform duration-300 ${secaoAnalistasAberta ? 'rotate-0' : '-rotate-90 scale-90'} group-hover:scale-110`} />
+            </button>
+            <div className="min-w-0">
               <h2 className="text-base font-black text-slate-800 tracking-tight">Produtividade por Analista</h2>
               <p className="text-xs text-slate-400">
                 {hasFilter
@@ -597,28 +590,22 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
             </div>
           </div>
 
-          {/* ⬇️ NOVO: Botões para Expandir / Retrair TUDO */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-              {Array.from(analistasAbertos).length}/{data.analistas.length} abertos
-            </span>
-            <button
-              type="button"
-              onClick={() => setAnalistasAbertos(new Set(data.analistas.map(a => a.nome)))}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider text-blue-600 bg-blue-50 border border-blue-100 hover:bg-blue-100 transition-colors"
-              title="Expandir todos os cards de analista"
-            >
-              <ChevronDown className="w-3.5 h-3.5" /> Abrir Todos
-            </button>
-            <button
-              type="button"
-              onClick={() => setAnalistasAbertos(new Set())}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider text-slate-500 bg-slate-100 border border-slate-200 hover:bg-slate-200 transition-colors"
-              title="Retrair todos os cards de analista"
-            >
-              <ChevronUp className="w-3.5 h-3.5" /> Fechar Todos
-            </button>
-          </div>
+          {/* ⬇️ NOVO: UM ÚNICO BOTÃO para expandir / retrair TODA a seção */}
+          <button
+            type="button"
+            onClick={() => setSecaoAnalistasAberta(v => !v)}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider border transition-all shadow-sm ${
+              secaoAnalistasAberta
+                ? 'text-slate-500 bg-slate-50 border-slate-200 hover:bg-slate-100'
+                : 'text-blue-600 bg-blue-50 border-blue-100 hover:bg-blue-100'
+            }`}
+          >
+            {secaoAnalistasAberta ? (
+              <><ChevronUp className="w-4 h-4" /> Recolher Detalhes</>
+            ) : (
+              <><ChevronDown className="w-4 h-4" /> Mostrar Detalhes</>
+            )}
+          </button>
         </div>
 
         {data.analistas.length === 0 ? (
@@ -630,110 +617,100 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
             <p className="text-xs text-slate-400">As medições feitas na tela de Mapeamento aparecerão agrupadas por analista aqui.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {data.analistas.map((an, idx) => {
-              const aberto = analistasAbertos.has(an.nome);
-              return (
-                <motion.div
-                  key={an.nome}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.05 }}
-                  className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 flex flex-col justify-between space-y-3 shadow-sm overflow-hidden"
-                >
-                  {/* Header do card: clicável para expandir/retrair */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAnalistasAbertos(prev => {
-                        const next = new Set(prev);
-                        if (next.has(an.nome)) next.delete(an.nome);
-                        else next.add(an.nome);
-                        return next;
-                      });
-                    }}
-                    className="w-full flex items-center justify-between gap-2 text-left group"
+          <AnimatePresence initial={false}>
+            <motion.div
+              key="analistas-grid"
+              initial={false}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0.4 }}
+              transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+              className="overflow-hidden"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {data.analistas.map((an, idx) => (
+                  <motion.div
+                    key={an.nome}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.05 }}
+                    className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 flex flex-col justify-between space-y-3 shadow-sm"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-11 h-11 rounded-full bg-blue-600 text-white font-black text-base flex items-center justify-center shadow-md shrink-0">
-                        {an.nome.charAt(0).toUpperCase()}
+                    {/* Header do card: NÃO É MAIS clicável (accordion só por seção) */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-11 h-11 rounded-full bg-blue-600 text-white font-black text-base flex items-center justify-center shadow-md shrink-0">
+                          {an.nome.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="font-bold text-slate-800 text-sm leading-tight truncate">{an.nome}</h3>
+                          <span className="text-[10px] font-semibold text-slate-400">Controlador de T&amp;P</span>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <h3 className="font-bold text-slate-800 text-sm leading-tight truncate">{an.nome}</h3>
-                        <span className="text-[10px] font-semibold text-slate-400">Controlador de T&amp;P</span>
-                      </div>
-                    </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <div className="text-right hidden sm:block">
+                      <div className="text-right shrink-0">
                         <span className="text-[10px] font-black uppercase text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
                           Projeção
                         </span>
                         <p className="text-xs font-black text-slate-700 font-mono mt-0.5">
-                          ~{an.capacidadeEstimadaDia}/dia
+                          ~{an.capacidadeEstimadaDia} itens/dia
                         </p>
                       </div>
-                      <div className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
-                        aberto ? 'bg-blue-600 text-white rotate-180' : 'bg-slate-200 text-slate-500 group-hover:bg-slate-300'
-                      }`}>
-                        <ChevronDown className="w-4 h-4" />
+                    </div>
+
+                    {/* Métricas: sempre visíveis */}
+                    <div className={`grid gap-2 pt-2 border-t border-slate-200/60 ${hasFilter ? 'grid-cols-2' : 'grid-cols-2'}`}>
+                      <div className="bg-white p-2.5 rounded-xl text-center border border-slate-100">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Hoje</span>
+                        <span className="text-base font-black text-emerald-600 font-mono">{an.hoje}</span>
+                      </div>
+                      <div className="bg-white p-2.5 rounded-xl text-center border border-blue-100">
+                        <span className="text-[9px] font-black text-blue-500 uppercase tracking-wider block">
+                          {hasFilter ? 'No Período' : 'Total'}
+                        </span>
+                        <span className="text-base font-black text-blue-600 font-mono">{an.total}</span>
                       </div>
                     </div>
-                  </button>
 
-                  {/* Resumo MINIMIZADO visível mesmo fechado (2 KPIs pequenos) */}
-                  <div className={`grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/60`}>
-                    <div className="bg-white p-2 rounded-xl text-center border border-slate-100">
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Hoje</span>
-                      <span className="text-base font-black text-emerald-600 font-mono">{an.hoje}</span>
-                    </div>
-                    <div className="bg-white p-2 rounded-xl text-center border border-blue-100">
-                      <span className="text-[9px] font-black text-blue-500 uppercase tracking-wider block">
-                        {hasFilter ? 'Período' : 'Total'}
-                      </span>
-                      <span className="text-base font-black text-blue-600 font-mono">{an.total}</span>
-                    </div>
-                  </div>
+                    {/* 🆕 Bloco de DETALHES: só aparece SE a seção estiver ABERTA */}
+                    <AnimatePresence initial={false}>
+                      {secaoAnalistasAberta && (
+                        <motion.div
+                          key={an.nome + '-detalhe'}
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1], delay: idx * 0.02 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="bg-white p-3 rounded-xl border border-slate-100 space-y-2">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="text-slate-500 font-semibold flex items-center gap-1">
+                                <Clock className="w-3.5 h-3.5 text-blue-500" />
+                                {hasFilter ? 'Tempo Médio da Peça no Período:' : 'Tempo Médio da Peça:'}
+                              </span>
+                              <span className="font-black text-slate-800 font-mono">
+                                {an.mediaTempo ? an.mediaTempo + 's' : '—'}
+                              </span>
+                            </div>
 
-                  {/* Conteúdo EXPANDIDO: Tempo Médio + Ritmo A → B */}
-                  <AnimatePresence initial={false}>
-                    {aberto && (
-                      <motion.div
-                        key={an.nome + '-detalhe'}
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                        className="overflow-hidden"
-                      >
-                        <div className="bg-white p-3 rounded-xl border border-slate-100 space-y-2 mt-1">
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="text-slate-500 font-semibold flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5 text-blue-500" />
-                              {hasFilter ? 'Tempo Médio da Peça no Período:' : 'Tempo Médio da Peça:'}
-                            </span>
-                            <span className="font-black text-slate-800 font-mono">
-                              {an.mediaTempo ? an.mediaTempo + 's' : '—'}
-                            </span>
+                            <div className="flex justify-between items-center text-xs pt-1.5 border-t border-slate-100">
+                              <span className="text-slate-500 font-semibold flex items-center gap-1" title="Ritmo médio de ciclo entre conclusões do Item A -> B -> C">
+                                <TrendingUp className="w-3.5 h-3.5 text-orange-500" />
+                                Ritmo (Item A ➔ B):
+                              </span>
+                              <span className="font-black text-orange-600 font-mono">
+                                {an.tempoMedioCicloMin ? an.tempoMedioCicloMin + ' min/item' : '—'}
+                              </span>
+                            </div>
                           </div>
-
-                          <div className="flex justify-between items-center text-xs pt-1.5 border-t border-slate-100">
-                            <span className="text-slate-500 font-semibold flex items-center gap-1" title="Ritmo médio de ciclo entre conclusões do Item A -> B -> C">
-                              <TrendingUp className="w-3.5 h-3.5 text-orange-500" />
-                              Ritmo (Item A ➔ B):
-                            </span>
-                            <span className="font-black text-orange-600 font-mono">
-                              {an.tempoMedioCicloMin ? an.tempoMedioCicloMin + ' min/item' : '—'}
-                            </span>
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              );
-            })}
-          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+          </AnimatePresence>
         )}
       </div>
 
