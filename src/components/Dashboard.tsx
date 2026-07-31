@@ -3,9 +3,50 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Users, CheckCircle2, Clock, Activity, RefreshCw, Loader2,
   TrendingUp, Boxes, Play, ArrowRight, Award, Calendar,
-  Filter, X, BarChart3, ChevronDown, Search, MapPin, ChevronUp
+  Filter, X, BarChart3, ChevronDown, Search, MapPin, ChevronUp, HelpCircle
 } from 'lucide-react';
 import { getDashboardAnalytics, DashboardData, DashboardDateRange, localDateKey, TpMapBucket } from '../lib/supabase';
+
+function InfoTooltip({ content, side = 'top' }: { content: React.ReactNode; side?: 'top' | 'right' | 'bottom' | 'left' }) {
+  const [open, setOpen] = useState(false);
+  const pos = {
+    top:    'bottom-full left-1/2 -translate-x-1/2 mb-2',
+    bottom: 'top-full left-1/2 -translate-x-1/2 mt-2',
+    right:  'left-full top-1/2 -translate-y-1/2 ml-2',
+    left:   'right-full top-1/2 -translate-y-1/2 mr-2',
+  }[side];
+  return (
+    <span
+      className="relative inline-flex"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        tabIndex={0}
+        onClick={(e) => { e.preventDefault(); setOpen(v => !v); }}
+        className="text-slate-400 hover:text-blue-500 transition-colors"
+      >
+        <HelpCircle className="w-3.5 h-3.5" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.span
+            initial={{ opacity: 0, y: 4, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.96 }}
+            transition={{ duration: 0.14 }}
+            className={`absolute z-50 ${pos} w-64 rounded-xl border border-slate-200 bg-white shadow-xl px-3 py-2 text-[11px] font-semibold text-slate-600 leading-relaxed pointer-events-none`}
+          >
+            {content}
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </span>
+  );
+}
 
 // ── Helpers de data rápidos para os atalhos (fuso LOCAL do navegador = Manaus)
 function addDays(d: Date, days: number): Date {
@@ -412,7 +453,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
             </div>
             <div>
               <h2 className="text-base font-black text-slate-800 tracking-tight">
-                Envelhecimento dos Itens Mapeados
+                Resumo itens mapeados x dias úteis
               </h2>
               <p className="text-xs text-slate-400">
                 Distribuição por dias úteis desde a conclusão do mapeamento (tp_map).
@@ -590,7 +631,6 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
             </div>
           </div>
 
-          {/* ⬇️ NOVO: UM ÚNICO BOTÃO para expandir / retrair TODA a seção */}
           <button
             type="button"
             onClick={() => setSecaoAnalistasAberta(v => !v)}
@@ -601,9 +641,9 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
             }`}
           >
             {secaoAnalistasAberta ? (
-              <><ChevronUp className="w-4 h-4" /> Recolher Detalhes</>
+              <><ChevronUp className="w-4 h-4" /> Recolher Seção</>
             ) : (
-              <><ChevronDown className="w-4 h-4" /> Mostrar Detalhes</>
+              <><ChevronDown className="w-4 h-4" /> Mostrar Seção</>
             )}
           </button>
         </div>
@@ -618,98 +658,113 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
           </div>
         ) : (
           <AnimatePresence initial={false}>
-            <motion.div
-              key="analistas-grid"
-              initial={false}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0.4 }}
-              transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-              className="overflow-hidden"
-            >
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {data.analistas.map((an, idx) => (
-                  <motion.div
-                    key={an.nome}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.05 }}
-                    className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 flex flex-col justify-between space-y-3 shadow-sm"
-                  >
-                    {/* Header do card: NÃO É MAIS clicável (accordion só por seção) */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-11 h-11 rounded-full bg-blue-600 text-white font-black text-base flex items-center justify-center shadow-md shrink-0">
-                          {an.nome.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className="font-bold text-slate-800 text-sm leading-tight truncate">{an.nome}</h3>
-                          <span className="text-[10px] font-semibold text-slate-400">Controlador de T&amp;P</span>
-                        </div>
-                      </div>
-
-                      <div className="text-right shrink-0">
-                        <span className="text-[10px] font-black uppercase text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
-                          Projeção
-                        </span>
-                        <p className="text-xs font-black text-slate-700 font-mono mt-0.5">
-                          ~{an.capacidadeEstimadaDia} itens/dia
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Métricas: sempre visíveis */}
-                    <div className={`grid gap-2 pt-2 border-t border-slate-200/60 ${hasFilter ? 'grid-cols-2' : 'grid-cols-2'}`}>
-                      <div className="bg-white p-2.5 rounded-xl text-center border border-slate-100">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Hoje</span>
-                        <span className="text-base font-black text-emerald-600 font-mono">{an.hoje}</span>
-                      </div>
-                      <div className="bg-white p-2.5 rounded-xl text-center border border-blue-100">
-                        <span className="text-[9px] font-black text-blue-500 uppercase tracking-wider block">
-                          {hasFilter ? 'No Período' : 'Total'}
-                        </span>
-                        <span className="text-base font-black text-blue-600 font-mono">{an.total}</span>
-                      </div>
-                    </div>
-
-                    {/* 🆕 Bloco de DETALHES: só aparece SE a seção estiver ABERTA */}
-                    <AnimatePresence initial={false}>
-                      {secaoAnalistasAberta && (
-                        <motion.div
-                          key={an.nome + '-detalhe'}
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1], delay: idx * 0.02 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="bg-white p-3 rounded-xl border border-slate-100 space-y-2">
-                            <div className="flex justify-between items-center text-xs">
-                              <span className="text-slate-500 font-semibold flex items-center gap-1">
-                                <Clock className="w-3.5 h-3.5 text-blue-500" />
-                                {hasFilter ? 'Tempo Médio da Peça no Período:' : 'Tempo Médio da Peça:'}
-                              </span>
-                              <span className="font-black text-slate-800 font-mono">
-                                {an.mediaTempo ? an.mediaTempo + 's' : '—'}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between items-center text-xs pt-1.5 border-t border-slate-100">
-                              <span className="text-slate-500 font-semibold flex items-center gap-1" title="Ritmo médio de ciclo entre conclusões do Item A -> B -> C">
-                                <TrendingUp className="w-3.5 h-3.5 text-orange-500" />
-                                Ritmo (Item A ➔ B):
-                              </span>
-                              <span className="font-black text-orange-600 font-mono">
-                                {an.tempoMedioCicloMin ? an.tempoMedioCicloMin + ' min/item' : '—'}
-                              </span>
-                            </div>
+            {secaoAnalistasAberta && (
+              <motion.div
+                key="analistas-grid"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {data.analistas.map((an, idx) => (
+                    <motion.div
+                      key={an.nome}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.05 }}
+                      className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 flex flex-col justify-between space-y-3 shadow-sm"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-11 h-11 rounded-full bg-blue-600 text-white font-black text-base flex items-center justify-center shadow-md shrink-0">
+                            {an.nome.charAt(0).toUpperCase()}
                           </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </motion.div>
-                ))}
-              </div>
-            </motion.div>
+                          <div className="min-w-0">
+                            <h3 className="font-bold text-slate-800 text-sm leading-tight truncate">{an.nome}</h3>
+                            <span className="text-[10px] font-semibold text-slate-400">Controlador de T&amp;P</span>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <span className="inline-flex items-center gap-1">
+                            <span className="text-[10px] font-black uppercase text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
+                              Projeção
+                            </span>
+                            <InfoTooltip
+                              side="left"
+                              content={
+                                <>
+                                  <b className="text-slate-800">Capacidade diária estimada</b><br />
+                                  Baseada no ritmo médio de ciclos (Item A → B → C) do analista em um expediente padrão de 8h úteis de trabalho.
+                                </>
+                              }
+                            />
+                          </span>
+                          <p className="text-xs font-black text-slate-700 font-mono mt-0.5">
+                            ~{an.capacidadeEstimadaDia} itens/dia
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-2 pt-2 border-t border-slate-200/60 grid-cols-2">
+                        <div className="bg-white p-2.5 rounded-xl text-center border border-slate-100">
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Hoje</span>
+                          <span className="text-base font-black text-emerald-600 font-mono">{an.hoje}</span>
+                        </div>
+                        <div className="bg-white p-2.5 rounded-xl text-center border border-blue-100">
+                          <span className="text-[9px] font-black text-blue-500 uppercase tracking-wider block">
+                            {hasFilter ? 'No Período' : 'Total'}
+                          </span>
+                          <span className="text-base font-black text-blue-600 font-mono">{an.total}</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-3 rounded-xl border border-slate-100 space-y-2">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-slate-500 font-semibold flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5 text-blue-500" />
+                            {hasFilter ? 'Tempo Médio da Peça no Período:' : 'Tempo Médio da Peça:'}
+                            <InfoTooltip
+                              side="top"
+                              content={
+                                <>
+                                  <b className="text-slate-800">Tempo médio por peça individual</b><br />
+                                  Média aritmética dos tempos cronometrados de cada peça/processo mapeado pelo analista.
+                                </>
+                              }
+                            />
+                          </span>
+                          <span className="font-black text-slate-800 font-mono">
+                            {an.mediaTempo ? an.mediaTempo + 's' : '—'}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between items-center text-xs pt-1.5 border-t border-slate-100">
+                          <span className="text-slate-500 font-semibold flex items-center gap-1">
+                            <TrendingUp className="w-3.5 h-3.5 text-orange-500" />
+                            Ritmo (Item A ➔ B):
+                            <InfoTooltip
+                              side="top"
+                              content={
+                                <>
+                                  <b className="text-slate-800">Ritmo médio de ciclos</b><br />
+                                  Tempo médio entre a conclusão de um item e o próximo item concluído sequencialmente (Item A → B → C). Inclui pausas naturais entre itens.
+                                </>
+                              }
+                            />
+                          </span>
+                          <span className="font-black text-orange-600 font-mono">
+                            {an.tempoMedioCicloMin ? an.tempoMedioCicloMin + ' min/item' : '—'}
+                          </span>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
           </AnimatePresence>
         )}
       </div>
