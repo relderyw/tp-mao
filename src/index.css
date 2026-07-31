@@ -1,14 +1,27 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --color-lsl-blue: #0066b2;
+  --color-lsl-blue-light: #0099e6;
+  --color-dark-bg: #0b1120;
+  --color-dark-surface: #111a2e;
+  --color-dark-card: #151f38;
+  --color-dark-border: #243152;
+  --color-dark-text: #e2e8f0;
+  --color-dark-muted: #94a3b8;
 }
 
 @layer base {
   body {
-    @apply font-sans;
+    @apply font-sans bg-gray-50 text-slate-900 antialiased transition-colors duration-300;
+  }
+  html.dark body {
+    @apply bg-[var(--color-dark-bg)] text-[var(--color-dark-text)];
   }
 }
 
@@ -40,7 +53,7 @@
   position: relative;
   z-index: 10;
   width: 100%;
-  max-width: 420px;
+  max-width: 460px;
   background: #ffffff;
   border-radius: 28px;
   border: 1px solid #e2e8f0;
@@ -50,6 +63,15 @@
     0 20px 40px -12px rgba(0, 0, 0, 0.15);
   text-align: center;
   box-sizing: border-box;
+  transition: all 0.3s ease;
+}
+
+html.dark .login-box {
+  background: var(--color-dark-surface);
+  border-color: var(--color-dark-border);
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.3),
+    0 24px 50px -12px rgba(0, 0, 0, 0.6);
 }
 
 .login-logo-wrap {
@@ -57,8 +79,8 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  max-width: 220px;
-  margin: 0 auto 2.5rem;
+  max-width: 360px;
+  margin: 0 auto 2rem;
   padding: 0;
 }
 
@@ -66,6 +88,11 @@
   width: 100%;
   height: auto;
   object-fit: contain;
+  filter: drop-shadow(0 4px 12px rgba(0,0,0,0.08));
+}
+
+html.dark .login-logo {
+  filter: drop-shadow(0 4px 14px rgba(0, 153, 230, 0.18)) brightness(1.05);
 }
 
 .login-title {
@@ -78,6 +105,8 @@
   line-height: 1.1;
 }
 
+html.dark .login-title { color: var(--color-dark-text); }
+
 .login-subtitle {
   color: #64748b;
   font-size: 0.925rem;
@@ -85,6 +114,8 @@
   margin: 0;
   line-height: 1.5;
 }
+
+html.dark .login-subtitle { color: var(--color-dark-muted); }
 
 .login-divider {
   width: 48px;
@@ -162,6 +193,8 @@
   text-align: left;
 }
 
+html.dark .login-label { color: var(--color-dark-muted); }
+
 .login-input-group {
   margin-bottom: 1.25rem;
   text-align: left;
@@ -182,9 +215,19 @@
   outline: none !important;
 }
 
+html.dark .login-input {
+  border-bottom-color: var(--color-dark-border) !important;
+  color: var(--color-dark-text) !important;
+}
+
 .login-input:focus {
   border-bottom-color: #0066b2 !important;
   background: rgba(0, 102, 178, 0.03) !important;
+}
+
+html.dark .login-input:focus {
+  border-bottom-color: var(--color-lsl-blue-light) !important;
+  background: rgba(0, 153, 230, 0.06) !important;
 }
 
 .login-pass-wrap {
@@ -211,6 +254,8 @@
 }
 
 .login-pass-toggle:hover { color: #475569; }
+html.dark .login-pass-toggle { color: var(--color-dark-muted); }
+html.dark .login-pass-toggle:hover { color: var(--color-dark-text); }
 
 .login-error {
   background: #fef2f2;
@@ -223,6 +268,14 @@
   text-align: left;
   margin-bottom: 1.25rem;
 }
+
+html.dark .login-error {
+  background: rgba(220, 38, 38, 0.12);
+  color: #fca5a5;
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
+html.dark .login-footer-note { color: #64748b; }
 
 .login-spinner {
   display: inline-block;
@@ -240,18 +293,25 @@
 
 /* ── App Header Logo ── */
 .app-logo-circle {
-  width: 44px;
-  height: 44px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
   background: #ffffff;
-  border: 2px solid rgba(0,102,178,0.2);
-  box-shadow: 0 2px 8px rgba(0,102,178,0.15);
+  border: 2px solid rgba(0,102,178,0.22);
+  box-shadow: 0 4px 14px rgba(0,102,178,0.18);
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  padding: 4px;
+  padding: 6px;
+  transition: all 0.3s ease;
+}
+
+html.dark .app-logo-circle {
+  background: var(--color-dark-card);
+  border-color: rgba(0, 153, 230, 0.35);
+  box-shadow: 0 4px 16px rgba(0, 153, 230, 0.25);
 }
 
 .app-logo-img {

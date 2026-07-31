@@ -6,9 +6,37 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   LogOut, Activity, BarChart3, Settings as SettingsIcon,
-  Table, Eye, EyeOff, Users, Clock, Package, ScanLine, FileText
+  Table, Eye, EyeOff, Users, Clock, Package, ScanLine, FileText,
+  Sun, Moon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+const THEME_STORAGE_KEY = 'tp-mao-theme';
+
+function useThemeToggle(): [boolean, () => void] {
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const saved = localStorage.getItem(THEME_STORAGE_KEY);
+      if (saved) return saved === 'dark';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (isDark) {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    try { localStorage.setItem(THEME_STORAGE_KEY, isDark ? 'dark' : 'light'); } catch {}
+  }, [isDark]);
+
+  return [isDark, () => setIsDark(v => !v)];
+}
 import Dashboard from './components/Dashboard';
 import MappingWorkspace from './components/MappingWorkspace';
 import ProcessManager from './components/ProcessManager';
@@ -164,6 +192,7 @@ function AppContent() {
   const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
   const [mappingDirtyCounter, setMappingDirtyCounter] = useState(0);
   const notifyMappingChanged = () => setMappingDirtyCounter(c => c + 1);
+  const [isDark, toggleDark] = useThemeToggle();
 
   // Restore session on mount
   useEffect(() => {
@@ -206,13 +235,13 @@ function AppContent() {
   const tabs = allPossibleTabs.filter(tab => isAdmin || userAllowedTabs.includes(tab.id as any));
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50">
+    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-[var(--color-dark-bg)] transition-colors duration-300">
       {/* ── Header ── */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
+      <header className="bg-white border-b border-gray-200 dark:bg-[var(--color-dark-surface)] dark:border-[var(--color-dark-border)] sticky top-0 z-30 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16 items-center">
+          <div className="flex justify-between h-20 items-center gap-3">
             {/* Logo */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               <div className="app-logo-circle">
                 <img
                   src="https://frenet.com.br/wp-content/uploads/2025/10/lsl-transportes.png"
@@ -221,24 +250,24 @@ function AppContent() {
                 />
               </div>
               <div className="hidden sm:flex flex-col leading-tight">
-                <span className="text-base font-black tracking-tight text-gray-900" style={{ letterSpacing: '-0.03em' }}>
+                <span className="text-base font-black tracking-tight text-gray-900 dark:text-[var(--color-dark-text)]" style={{ letterSpacing: '-0.03em' }}>
                   T&amp;P - MAO
                 </span>
-                <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: '#0066b2' }}>
+                <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: isDark ? '#38bdf8' : '#0066b2' }}>
                   LSL Transportes
                 </span>
               </div>
             </div>
 
             {/* Nome da Tela Ativa no Centro do Header */}
-            <div className="flex-1 flex justify-center items-center px-3">
-              <span className="text-sm sm:text-base font-black tracking-tight text-gray-800 uppercase font-mono px-3 py-1 rounded-full bg-slate-100 border border-slate-200/80">
+            <div className="flex-1 flex justify-center items-center px-2 hidden sm:flex">
+              <span className="text-sm sm:text-base font-black tracking-tight text-gray-800 dark:text-[var(--color-dark-text)] uppercase font-mono px-3 py-1 rounded-full bg-slate-100 dark:bg-[var(--color-dark-card)] border border-slate-200/80 dark:border-[var(--color-dark-border)] transition-colors duration-300">
                 {tabs.find(t => t.id === activeTab)?.label || 'T&P - MAO'}
               </span>
             </div>
 
             {/* Desktop Nav */}
-            <nav className="hidden md:flex items-center gap-1">
+            <nav className="hidden lg:flex items-center gap-1">
               {tabs.map(tab => (
                 <button
                   key={tab.id}
@@ -246,15 +275,15 @@ function AppContent() {
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     activeTab === tab.id
                       ? 'nav-tab-active'
-                      : 'text-gray-600 hover:bg-gray-100'
+                      : 'text-gray-600 hover:bg-gray-100 dark:text-[var(--color-dark-muted)] dark:hover:bg-[var(--color-dark-card)]'
                   }`}
-                  style={activeTab === tab.id ? { background: 'rgba(0,102,178,0.08)', color: '#0066b2' } : {}}
+                  style={activeTab === tab.id ? { background: isDark ? 'rgba(56,189,248,0.14)' : 'rgba(0,102,178,0.08)', color: isDark ? '#38bdf8' : '#0066b2' } : {}}
                 >
                   <tab.icon className="w-4 h-4" />
                   {tab.label}
                   {tab.id === 'users' && (
                     <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded uppercase tracking-wide"
-                      style={{ background: 'rgba(0,102,178,0.12)', color: '#0066b2' }}>
+                      style={{ background: isDark ? 'rgba(56,189,248,0.18)' : 'rgba(0,102,178,0.12)', color: isDark ? '#38bdf8' : '#0066b2' }}>
                       Admin
                     </span>
                   )}
@@ -262,30 +291,59 @@ function AppContent() {
               ))}
             </nav>
 
-            {/* User + Logout */}
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 pr-4 border-r border-gray-200">
+            {/* Controles: Tema + User + Logout */}
+            <div className="flex items-center gap-3">
+              {/* Toggle Tema Escuro */}
+              <button
+                type="button"
+                onClick={toggleDark}
+                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-sm border ${
+                  isDark
+                    ? 'bg-[var(--color-dark-card)] border-[var(--color-dark-border)] text-amber-400 hover:bg-[var(--color-dark-border)]'
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+                title={isDark ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+              >
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.span
+                    key={isDark ? 'moon' : 'sun'}
+                    initial={{ opacity: 0, rotate: -90, scale: 0.6 }}
+                    animate={{ opacity: 1, rotate: 0, scale: 1 }}
+                    exit={{ opacity: 0, rotate: 90, scale: 0.6 }}
+                    transition={{ duration: 0.22 }}
+                    className="flex items-center justify-center"
+                  >
+                    {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                  </motion.span>
+                </AnimatePresence>
+              </button>
+
+              {/* Avatar / Nome do Usuário */}
+              <div className="flex items-center gap-2 pr-3 border-r border-gray-200 dark:border-[var(--color-dark-border)]">
                 <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm"
-                  style={{ background: isAdmin ? '#0066b2' : '#3b82f6' }}
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0"
+                  style={{ background: isAdmin ? (isDark ? '#0284c7' : '#0066b2') : '#3b82f6' }}
                 >
                   {currentUser.displayName.charAt(0).toUpperCase()}
                 </div>
-                <div className="hidden lg:flex flex-col">
-                  <span className="text-sm font-medium text-gray-700 leading-tight">
+                <div className="hidden xl:flex flex-col">
+                  <span className="text-sm font-medium text-gray-700 dark:text-[var(--color-dark-text)] leading-tight">
                     {currentUser.displayName}
                   </span>
-                  <span className="text-xs text-gray-400 leading-tight">
+                  <span className="text-xs text-gray-400 dark:text-[var(--color-dark-muted)] leading-tight">
                     {currentUser.cargo}
                   </span>
                 </div>
               </div>
               <button
                 onClick={handleLogout}
-                className="p-2 text-gray-500 rounded-lg transition-colors"
-                style={{} as any}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#0066b2'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,102,178,0.08)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = ''; (e.currentTarget as HTMLButtonElement).style.background = ''; }}
+                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
+                  isDark
+                    ? 'text-[var(--color-dark-muted)] hover:text-sky-400 hover:bg-[var(--color-dark-card)]'
+                    : 'text-gray-500 hover:text-[#0066b2]'
+                }`}
+                onMouseEnter={e => { if (!isDark) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,102,178,0.08)'; } }}
+                onMouseLeave={e => { if (!isDark) { (e.currentTarget as HTMLButtonElement).style.background = ''; } }}
                 title="Sair"
               >
                 <LogOut className="w-5 h-5" />
@@ -336,7 +394,7 @@ function AppContent() {
       </main>
 
       {/* ── Mobile Navigation ── */}
-      <nav className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-white/80 backdrop-blur-md border border-gray-200 px-4 py-2 rounded-full shadow-xl z-30 flex gap-2">
+      <nav className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-white/90 dark:bg-[var(--color-dark-surface)]/90 backdrop-blur-md border border-gray-200 dark:border-[var(--color-dark-border)] px-4 py-2 rounded-full shadow-xl z-30 flex gap-2 transition-colors duration-300">
         {tabs.map(tab => (
           <button
             key={tab.id}
@@ -344,9 +402,9 @@ function AppContent() {
             className={`p-3 rounded-full transition-colors ${
               activeTab === tab.id
                 ? 'text-white'
-                : 'text-gray-500 hover:bg-gray-100'
+                : 'text-gray-500 dark:text-[var(--color-dark-muted)] hover:bg-gray-100 dark:hover:bg-[var(--color-dark-card)]'
             }`}
-            style={activeTab === tab.id ? { background: '#0066b2', boxShadow: '0 4px 12px rgba(0,102,178,0.35)' } : {}}
+            style={activeTab === tab.id ? { background: isDark ? '#0284c7' : '#0066b2', boxShadow: isDark ? '0 4px 14px rgba(56,189,248,0.35)' : '0 4px 12px rgba(0,102,178,0.35)' } : {}}
           >
             <tab.icon className="w-5 h-5" />
           </button>
