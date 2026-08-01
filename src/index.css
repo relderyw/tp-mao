@@ -292,34 +292,22 @@ html.dark .login-footer-note { color: #64748b; }
 }
 
 /* ── App Header Logo ── */
-.app-logo-circle {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  overflow: visible;
+.app-logo-wrap {
+  height: 52px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   flex-shrink: 0;
   padding: 0;
   transition: all 0.3s ease;
 }
 
-html.dark .app-logo-circle {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-}
-
 .app-logo-img {
-  width: 140%;
-  height: 140%;
+  height: 100%;
+  width: auto;
   max-width: none;
   object-fit: contain;
-  filter: drop-shadow(0 4px 14px rgba(0,102,178,0.22));
+  filter: drop-shadow(0 3px 10px rgba(0,102,178,0.18));
 }
 
 /* ════════════════════════════════════════

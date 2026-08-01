@@ -105,7 +105,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: AppUser) => void }) {
         {/* LSL Logo */}
         <div className="login-logo-wrap">
           <img
-            src="https://frenet.com.br/wp-content/uploads/2025/10/lsl-transportes.png"
+            src="/lsl-logo.png"
             alt="LSL Transportes"
             className="login-logo"
           />
@@ -239,23 +239,15 @@ function AppContent() {
       {/* ── Header ── */}
       <header className="bg-white border-b border-gray-200 dark:bg-[var(--color-dark-surface)] dark:border-[var(--color-dark-border)] sticky top-0 z-30 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-20 items-center gap-2 sm:gap-3">
-            {/* Logo */}
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-shrink-0">
-              <div className="app-logo-circle">
+          <div className="flex justify-between h-20 items-center gap-2 sm:gap-4">
+            {/* Logo (agora em /lsl-logo.png, PNG 300x138 com fundo transparente) */}
+            <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
+              <div className="app-logo-wrap">
                 <img
-                  src="https://frenet.com.br/wp-content/uploads/2025/10/lsl-transportes.png"
-                  alt="LSL"
+                  src="/lsl-logo.png"
+                  alt="LSL Transportes"
                   className="app-logo-img"
                 />
-              </div>
-              <div className="hidden sm:flex flex-col leading-tight">
-                <span className="text-base font-black tracking-tight text-gray-900 dark:text-[var(--color-dark-text)]" style={{ letterSpacing: '-0.03em' }}>
-                  T&amp;P - MAO
-                </span>
-                <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: isDark ? '#38bdf8' : '#0066b2' }}>
-                  LSL Transportes
-                </span>
               </div>
             </div>
 
@@ -266,7 +258,7 @@ function AppContent() {
               return (
                 <div className="flex-1 flex justify-center items-center px-1 min-w-0">
                   <div
-                    className="inline-flex items-center gap-2 px-3 sm:px-5 py-2 rounded-2xl font-black uppercase tracking-wide transition-colors duration-300"
+                    className="inline-flex items-center gap-2 px-3 sm:px-5 py-2 rounded-2xl font-black uppercase tracking-wide transition-colors duration-300 whitespace-nowrap"
                     style={{
                       background: isDark ? 'rgba(56,189,248,0.10)' : 'rgba(0,102,178,0.08)',
                       color: isDark ? '#38bdf8' : '#0066b2',
