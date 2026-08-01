@@ -157,7 +157,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
     ? Number(((data.stats.concluidos / data.stats.total) * 100).toFixed(1))
     : 0;
 
-  const PLANO_DIARIO = 30;
+  const META_POR_ANALISTA = 30;
+  const PLANO_DIARIO = Math.max(1, data.analistas.length) * META_POR_ANALISTA;
   const hojeMapeados = data.tpMapDistribution[0]?.quantidade || 0;
   const diferencaHoje = hojeMapeados - PLANO_DIARIO;
 
@@ -427,7 +428,12 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
               <Calendar className="w-6 h-6" />
             </div>
             <div className="min-w-0 flex-1">
-              <span className="text-[10px] font-black uppercase tracking-widest text-sky-600 dark:text-sky-400">Hoje</span>
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-[10px] font-black uppercase tracking-widest text-sky-600 dark:text-sky-400">Hoje</span>
+                <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 tracking-wide">
+                  ({data.analistas.length} analista{data.analistas.length === 1 ? '' : 's'} × {META_POR_ANALISTA}/dia)
+                </span>
+              </div>
               <p className="text-2xl font-black text-slate-800 dark:text-[var(--color-dark-text)] font-mono leading-tight mb-2">{hojeMapeados}</p>
             </div>
           </div>
@@ -783,6 +789,31 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
                           <span className="text-base font-black text-blue-600 dark:text-sky-400 font-mono">{an.total}</span>
                         </div>
                       </div>
+
+                      {/* Plano / Real / Dif do analista */}
+                      {(() => {
+                        const metaAn = META_POR_ANALISTA;
+                        const realAn = an.hoje;
+                        const difAn = realAn - metaAn;
+                        return (
+                          <div className="bg-slate-50/60 dark:bg-[var(--color-dark-card)] p-2.5 rounded-xl grid grid-cols-3 gap-1.5 text-center border border-slate-100 dark:border-[var(--color-dark-border)]">
+                            <div>
+                              <span className="block text-[8px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Plano</span>
+                              <span className="text-sm font-black font-mono text-slate-700 dark:text-slate-300">{metaAn}</span>
+                            </div>
+                            <div>
+                              <span className="block text-[8px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Real</span>
+                              <span className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400">{realAn}</span>
+                            </div>
+                            <div>
+                              <span className="block text-[8px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Dif</span>
+                              <span className={`text-sm font-black font-mono ${difAn >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                {difAn >= 0 ? '+' : ''}{difAn}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       <div className="bg-white dark:bg-[var(--color-dark-border)] p-3 rounded-xl border border-slate-100 dark:border-transparent space-y-2">
                         <div className="flex justify-between items-center text-xs">

@@ -239,9 +239,9 @@ function AppContent() {
       {/* ── Header ── */}
       <header className="bg-white border-b border-gray-200 dark:bg-[var(--color-dark-surface)] dark:border-[var(--color-dark-border)] sticky top-0 z-30 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-24 items-center gap-2 sm:gap-3">
+          <div className="flex justify-between h-20 items-center gap-2 sm:gap-3">
             {/* Logo */}
-            <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-shrink-0">
               <div className="app-logo-circle">
                 <img
                   src="https://frenet.com.br/wp-content/uploads/2025/10/lsl-transportes.png"
@@ -260,11 +260,29 @@ function AppContent() {
             </div>
 
             {/* Nome da Tela Ativa no Centro do Header */}
-            <div className="flex-1 flex justify-center items-center px-1 sm:px-2 min-w-0">
-              <span className="text-[10px] sm:text-sm lg:text-base font-black tracking-tight text-gray-800 dark:text-[var(--color-dark-text)] uppercase font-mono px-2 sm:px-3 py-0.5 sm:py-1 rounded-full bg-slate-100 dark:bg-[var(--color-dark-card)] border border-slate-200/80 dark:border-[var(--color-dark-border)] transition-colors duration-300 truncate max-w-[180px] sm:max-w-none">
-                {tabs.find(t => t.id === activeTab)?.label || 'T&P - MAO'}
-              </span>
-            </div>
+            {(() => {
+              const tabAtiva = tabs.find(t => t.id === activeTab);
+              const TabIcone = tabAtiva?.icon ?? Activity;
+              return (
+                <div className="flex-1 flex justify-center items-center px-1 min-w-0">
+                  <div
+                    className="inline-flex items-center gap-2 px-3 sm:px-5 py-2 rounded-2xl font-black uppercase tracking-wide transition-colors duration-300"
+                    style={{
+                      background: isDark ? 'rgba(56,189,248,0.10)' : 'rgba(0,102,178,0.08)',
+                      color: isDark ? '#38bdf8' : '#0066b2',
+                      boxShadow: isDark
+                        ? '0 0 0 1px rgba(56,189,248,0.22), inset 0 1px 0 rgba(255,255,255,0.03)'
+                        : '0 0 0 1px rgba(0,102,178,0.10), inset 0 1px 0 rgba(255,255,255,0.6)',
+                    }}
+                  >
+                    <TabIcone className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                    <span className="text-sm sm:text-base font-black leading-none">
+                      {tabAtiva?.label || 'Dashboard'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Desktop Nav */}
             <nav className="hidden lg:flex items-center gap-1">
