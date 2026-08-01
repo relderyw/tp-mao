@@ -238,8 +238,8 @@ function AppContent() {
     <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-[var(--color-dark-bg)] transition-colors duration-300">
       {/* ── Header ── */}
       <header className="bg-white border-b border-gray-200 dark:bg-[var(--color-dark-surface)] dark:border-[var(--color-dark-border)] sticky top-0 z-30 transition-colors duration-300">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-20 items-center gap-3">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-24 items-center gap-2 sm:gap-3">
             {/* Logo */}
             <div className="flex items-center gap-3 min-w-0">
               <div className="app-logo-circle">
@@ -260,8 +260,8 @@ function AppContent() {
             </div>
 
             {/* Nome da Tela Ativa no Centro do Header */}
-            <div className="flex-1 flex justify-center items-center px-2 hidden sm:flex">
-              <span className="text-sm sm:text-base font-black tracking-tight text-gray-800 dark:text-[var(--color-dark-text)] uppercase font-mono px-3 py-1 rounded-full bg-slate-100 dark:bg-[var(--color-dark-card)] border border-slate-200/80 dark:border-[var(--color-dark-border)] transition-colors duration-300">
+            <div className="flex-1 flex justify-center items-center px-1 sm:px-2 min-w-0">
+              <span className="text-[10px] sm:text-sm lg:text-base font-black tracking-tight text-gray-800 dark:text-[var(--color-dark-text)] uppercase font-mono px-2 sm:px-3 py-0.5 sm:py-1 rounded-full bg-slate-100 dark:bg-[var(--color-dark-card)] border border-slate-200/80 dark:border-[var(--color-dark-border)] transition-colors duration-300 truncate max-w-[180px] sm:max-w-none">
                 {tabs.find(t => t.id === activeTab)?.label || 'T&P - MAO'}
               </span>
             </div>

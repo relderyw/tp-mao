@@ -157,6 +157,10 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
     ? Number(((data.stats.concluidos / data.stats.total) * 100).toFixed(1))
     : 0;
 
+  const PLANO_DIARIO = 30;
+  const hojeMapeados = data.tpMapDistribution[0]?.quantidade || 0;
+  const diferencaHoje = hojeMapeados - PLANO_DIARIO;
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-32 gap-3">
@@ -416,20 +420,32 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
           </div>
         </div>
 
-        {/* Barra de progresso */}
-        <div className="col-span-1 sm:col-span-2 lg:col-span-4 bg-white dark:bg-[var(--color-dark-surface)] p-4 rounded-3xl border border-slate-100 dark:border-[var(--color-dark-border)] shadow-sm transition-colors duration-300">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-[var(--color-dark-muted)]">Progresso Geral</span>
-            <span className="text-xs font-black text-slate-700 dark:text-[var(--color-dark-text)] font-mono">{percentConcluido}%</span>
+        {/* HOJE - Plano x Real x Dif */}
+        <div className="bg-white dark:bg-[var(--color-dark-surface)] p-5 rounded-3xl border border-sky-100 dark:border-sky-400/20 shadow-sm transition-colors duration-300">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-sky-50 dark:bg-sky-400/10 text-sky-600 dark:text-sky-400 flex items-center justify-center flex-shrink-0">
+              <Calendar className="w-6 h-6" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] font-black uppercase tracking-widest text-sky-600 dark:text-sky-400">Hoje</span>
+              <p className="text-2xl font-black text-slate-800 dark:text-[var(--color-dark-text)] font-mono leading-tight mb-2">{hojeMapeados}</p>
+            </div>
           </div>
-          <div className="w-full h-3 rounded-full bg-slate-100 dark:bg-[var(--color-dark-border)] overflow-hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${percentConcluido}%` }}
-              transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-              className="h-full rounded-full"
-              style={{ background: 'linear-gradient(90deg, #10b981 0%, #0066b2 100%)' }}
-            />
+          <div className="mt-2 pt-3 border-t border-slate-100 dark:border-[var(--color-dark-border)] grid grid-cols-3 gap-2 text-center">
+            <div>
+              <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-[var(--color-dark-muted)]">Plano</span>
+              <span className="text-sm font-black font-mono text-slate-700 dark:text-slate-200">{PLANO_DIARIO}</span>
+            </div>
+            <div>
+              <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-[var(--color-dark-muted)]">Real</span>
+              <span className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400">{hojeMapeados}</span>
+            </div>
+            <div>
+              <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-[var(--color-dark-muted)]">Dif</span>
+              <span className={`text-sm font-black font-mono ${diferencaHoje >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                {diferencaHoje >= 0 ? '+' : ''}{diferencaHoje}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -452,6 +468,23 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
           <div>
             <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-[var(--color-dark-muted)]">Pendentes</span>
             <p className="text-2xl font-black text-slate-700 dark:text-[var(--color-dark-text)] font-mono leading-tight">{data.stats.pendentes.toLocaleString()}</p>
+          </div>
+        </div>
+
+        {/* Barra de progresso */}
+        <div className="col-span-1 sm:col-span-2 lg:col-span-3 bg-white dark:bg-[var(--color-dark-surface)] p-4 rounded-3xl border border-slate-100 dark:border-[var(--color-dark-border)] shadow-sm transition-colors duration-300">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-[var(--color-dark-muted)]">Progresso Geral</span>
+            <span className="text-xs font-black text-slate-700 dark:text-[var(--color-dark-text)] font-mono">{percentConcluido}%</span>
+          </div>
+          <div className="w-full h-3 rounded-full bg-slate-100 dark:bg-[var(--color-dark-border)] overflow-hidden">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${percentConcluido}%` }}
+              transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+              className="h-full rounded-full"
+              style={{ background: 'linear-gradient(90deg, #10b981 0%, #0066b2 100%)' }}
+            />
           </div>
         </div>
       </div>
@@ -485,6 +518,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
             const hoje = data.tpMapDistribution[0]?.quantidade || 0;
             const novos7 = data.tpMapDistribution.slice(0, 7).reduce((s, b) => s + b.quantidade, 0);
             const velhos = (data.tpMapDistribution[30]?.quantidade || 0);
+            const difHoje = hoje - PLANO_DIARIO;
             return (
               <div className="flex gap-2 flex-wrap">
                 <div className="bg-slate-50 dark:bg-[var(--color-dark-card)] border border-slate-100 dark:border-[var(--color-dark-border)] rounded-xl px-3 py-2 text-center">
@@ -493,11 +527,33 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
                   </span>
                   <span className="text-sm font-black text-slate-800 dark:text-[var(--color-dark-text)] font-mono">{totalMapeados}</span>
                 </div>
-                <div className="bg-emerald-50 dark:bg-emerald-400/10 border border-emerald-100 dark:border-emerald-400/20 rounded-xl px-3 py-2 text-center">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
-                    Hoje
-                  </span>
-                  <span className="text-sm font-black text-emerald-700 dark:text-emerald-300 font-mono">{hoje}</span>
+                <div className="bg-emerald-50 dark:bg-emerald-400/10 border border-emerald-100 dark:border-emerald-400/20 rounded-xl px-3 py-2 text-center flex-[2] min-w-[220px]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
+                        Hoje
+                      </span>
+                      <span className="text-sm font-black text-emerald-700 dark:text-emerald-300 font-mono">{hoje}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] font-black font-mono text-right leading-tight">
+                      <div>
+                        <span className="block text-[8px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">Plano</span>
+                        <span className="text-slate-700 dark:text-slate-300">{PLANO_DIARIO}</span>
+                      </div>
+                      <span className="text-slate-300 dark:text-slate-600">|</span>
+                      <div>
+                        <span className="block text-[8px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">Real</span>
+                        <span className="text-emerald-700 dark:text-emerald-300">{hoje}</span>
+                      </div>
+                      <span className="text-slate-300 dark:text-slate-600">|</span>
+                      <div>
+                        <span className="block text-[8px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">Dif</span>
+                        <span className={difHoje >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                          {difHoje >= 0 ? '+' : ''}{difHoje}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div className="bg-blue-50 dark:bg-sky-400/10 border border-blue-100 dark:border-sky-400/20 rounded-xl px-3 py-2 text-center">
                   <span className="text-[9px] font-black uppercase tracking-wider text-blue-600 dark:text-sky-400 block">
@@ -704,7 +760,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
                               content={
                                 <>
                                   <b className="text-slate-800 dark:text-slate-100">Capacidade diária estimada</b><br />
-                                  Baseada no ritmo médio de ciclos (Item A → B → C) do analista em um expediente padrão de 8h úteis de trabalho.
+                                  Baseada no ritmo médio de ciclos (Item A → B → C) do analista em um expediente padrão de 7h úteis de trabalho.
                                 </>
                               }
                             />
