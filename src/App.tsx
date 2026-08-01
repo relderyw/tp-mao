@@ -251,12 +251,13 @@ function AppContent() {
               </div>
             </div>
 
-            {/* Nome da Tela Ativa no Centro do Header */}
+            {/* Nome da Tela Ativa (Central) — APENAS em mobile/tablet (<lg).
+                No desktop (>=lg) a nav desktop já mostra a aba ativa com destaque. */}
             {(() => {
               const tabAtiva = tabs.find(t => t.id === activeTab);
               const TabIcone = tabAtiva?.icon ?? Activity;
               return (
-                <div className="flex-1 flex justify-center items-center px-1 min-w-0">
+                <div className="flex-1 lg:flex-none flex lg:hidden justify-center items-center px-1 min-w-0">
                   <div
                     className="inline-flex items-center gap-2 px-3 sm:px-5 py-2 rounded-2xl font-black uppercase tracking-wide transition-colors duration-300 whitespace-nowrap"
                     style={{
@@ -277,7 +278,7 @@ function AppContent() {
             })()}
 
             {/* Desktop Nav */}
-            <nav className="hidden lg:flex items-center gap-1">
+            <nav className="hidden lg:flex lg:flex-1 lg:justify-center items-center gap-1">
               {tabs.map(tab => (
                 <button
                   key={tab.id}
