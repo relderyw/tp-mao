@@ -1,22 +1,28 @@
-import { createClient } from '@supabase/supabase-js';
+/**
+ * ═══════════════════════════════════════════════════════════════════
+ * FIRESTORE DATABASE SERVICE (Substituição de alta performance do Supabase)
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ * Todas as operações agora leem e gravam no Google Cloud Firestore.
+ * Mantém 100% de compatibilidade com as assinaturas de funções existentes.
+ */
 
-const supabaseUrl = ((import.meta as any).env?.VITE_SUPABASE_URL || 'https://efeikudymqplfamtexgq.supabase.co') as string;
-const supabaseKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'sb_publishable_IKq4DPh80AlDfYmElLvw4Q_xAUYE6hf') as string;
-
-export const supabase = createClient(supabaseUrl, supabaseKey);
+import { db } from './firebase';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  query,
+  where,
+  limit as firestoreLimit
+} from 'firebase/firestore';
 
 // ── Helpers de Data (Fuso Local — Manaus UTC-4, etc.) ──────────────
-// Regra GOLD: Banco SEMPRE grava datas em UTC (.toISOString).
-// Quando precisar AGUPAR / COMPARAR por DIA LOCAL (Manaus = UTC-4),
-// SEMPRE converta o timestamp UTC para a data de referência LOCAL antes.
-
-// Fuso HORÁRIO PADRÃO da aplicação = Manaus (UTC-4).
-// Usamos timezone EXPLÍCITO para não depender das configurações do SO do usuário,
-// que pode estar em "America/Sao_Paulo" (UTC-3) e distorcer todos os horários em 1h.
 export const MANAUS_TZ = 'America/Manaus';
 
-/** Converte Data → "YYYY-MM-DD" no FUSO LOCAL DO NAVEGADOR (não UTC).
- *  Ex: 2026-07-29T02:00:00Z (UTC) → 2026-07-28 em Manaus (UTC-4). */
+/** Converte Data → "YYYY-MM-DD" no FUSO LOCAL DO NAVEGADOR (não UTC). */
 export function localDateKey(dateInput: Date | string): string {
   const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
   if (isNaN(d.getTime())) return '';
@@ -33,12 +39,10 @@ export function parseIsoCalendarDate(raw: string): { y: number; m: number; d: nu
   return { y: +m[1], m: +m[2], d: +m[3] };
 }
 
-/** Registros antigos gravados só como data viram meia-noite UTC no Postgres → 20:00 falso em Manaus. */
+/** Registros antigos gravados só como data viram meia-noite UTC → 20:00 falso em Manaus. */
 export function isLegacyDateOnlyTimestamp(raw: string, d: Date): boolean {
   const trimmed = String(raw).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return true;
-  // Meia-noite UTC exata = coluna date ou import legado sem horário real.
-  // Cobre "2026-07-28T00:00:00Z" e "2026-07-28 00:00:00+00" (espaço em vez de T).
   return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 &&
          d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
 }
@@ -67,9 +71,7 @@ export function fmtManausDate(dateInput: Date | string | null | undefined): stri
   } catch { return String(dateInput); }
 }
 
-/** Converte ISO-UTC (ou Date) → "dd/MM/yyyy HH:mm" no fuso EXPLÍCITO de Manaus.
- *  Detecta automaticamente: se o valor original é SÓ DATA ("YYYY-MM-DD" sem horário),
- *  retorna a data SEM adicionar horário falso (ex: não inventa "20:00"). */
+/** Converte ISO-UTC (ou Date) → "dd/MM/yyyy HH:mm" no fuso EXPLÍCITO de Manaus. */
 export function fmtManausDateTime(dateInput: Date | string | null | undefined): string {
   if (!dateInput) return '—';
   try {
@@ -77,12 +79,10 @@ export function fmtManausDateTime(dateInput: Date | string | null | undefined): 
     const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
     if (isNaN(d.getTime())) return raw;
 
-    // Caso 1: valor SÓ DATA legado → exibimos apenas a data, sem horário inventado (20:00).
     if (isLegacyDateOnlyTimestamp(raw, d)) {
       return fmtLegacyCalendarDate(raw);
     }
 
-    // Caso 2: ISO com horário UTC — formatamos data+horário em Manaus (UTC-4).
     const partes = new Intl.DateTimeFormat('pt-BR', {
       timeZone: MANAUS_TZ,
       day: '2-digit',
@@ -98,8 +98,7 @@ export function fmtManausDateTime(dateInput: Date | string | null | undefined): 
   } catch { return String(dateInput); }
 }
 
-/** Converte ISO-UTC (ou Date) → "HH:mm" no fuso EXPLÍCITO de Manaus.
- *  Se o valor for "só data" retorna vazio, não inventa 20:00. */
+/** Converte ISO-UTC (ou Date) → "HH:mm" no fuso EXPLÍCITO de Manaus. */
 export function fmtManausTime(dateInput: Date | string | null | undefined): string {
   if (!dateInput) return '';
   try {
@@ -119,19 +118,11 @@ export function fmtManausTime(dateInput: Date | string | null | undefined): stri
   } catch { return ''; }
 }
 
-/** Data de mapeamento para exibição — trata registros legados e timestamps reais. */
-export function fmtMappingDate(
-  dataMap?: string | null,
-  _updatedAt?: string | null
-): string {
+export function fmtMappingDate(dataMap?: string | null, _updatedAt?: string | null): string {
   return fmtManausDate(dataMap);
 }
 
-/** Hora de mapeamento — usa updated_at quando data_map é legado sem horário real. */
-export function fmtMappingTime(
-  dataMap?: string | null,
-  updatedAt?: string | null
-): string {
+export function fmtMappingTime(dataMap?: string | null, updatedAt?: string | null): string {
   if (!dataMap) return updatedAt ? fmtManausTime(updatedAt) : '';
   try {
     const raw = String(dataMap);
@@ -144,35 +135,25 @@ export function fmtMappingTime(
   } catch { return ''; }
 }
 
-/** Data+hora de mapeamento para exibição/CSV. */
-export function fmtMappingDateTime(
-  dataMap?: string | null,
-  updatedAt?: string | null
-): string {
+export function fmtMappingDateTime(dataMap?: string | null, updatedAt?: string | null): string {
   const date = fmtMappingDate(dataMap, updatedAt);
   const time = fmtMappingTime(dataMap, updatedAt);
   if (date === '—') return '—';
   return time ? `${date} ${time}` : date;
 }
 
-/** Data "YYYY-MM-DD" no fuso LOCAL → ISO UTC do 1° segundo daquele dia.
- *  Ex: "2026-07-28" em Manaus → 2026-07-28T04:00:00.000Z */
 export function localStartOfDayToUtcIso(localDateStr: string): string {
   if (!localDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(localDateStr)) return '';
   const [y, m, d] = localDateStr.split('-').map(Number);
   return new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();
 }
 
-/** Data "YYYY-MM-DD" no fuso LOCAL → ISO UTC do último ms daquele dia.
- *  Ex: "2026-07-28" em Manaus → 2026-07-29T03:59:59.999Z */
 export function localEndOfDayToUtcIso(localDateStr: string): string {
   if (!localDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(localDateStr)) return '';
   const [y, m, d] = localDateStr.split('-').map(Number);
   return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
 }
 
-/** "YYYY-MM-DD HH:MM:SS" em data LOCAL → ISO UTC equivalente.
- *  Usado para converter valores de input do usuário em UTC p/ filtros de query. */
 export function localDateTimeToUtcIso(dateStr: string, timeStr = '00:00:00'): string {
   const [y, m, d] = (dateStr || '').split('-').map(Number);
   const [h, mi, s] = (timeStr || '00:00:00').split(':').map(n => parseInt(n, 10) || 0);
@@ -246,8 +227,6 @@ export interface SkuTp {
   tp_emb_dcc?: string | null;
   pd_emb_dcc?: string | null;
   carro?: string | null;
-  // Dias úteis (seg-sex) desde o mapeamento: calculado no DB via trigger.
-  // Item mapeado HOJE = 0. Amanhã dia útil = 1. Sábado/domingo não contam.
   tp_map?: number | null;
   // Resultado
   tempo_total?: number | null;
@@ -272,7 +251,7 @@ export function sanitizeSkuTpPayload(payload: Record<string, any>, excludeId = t
   for (const [key, value] of Object.entries(payload)) {
     if (VALID_SKU_TP_COLUMNS.has(key)) {
       if (excludeId && (key === 'id' || key === 'created_at')) continue;
-      clean[key] = value;
+      if (value !== undefined) clean[key] = value;
     }
   }
   return clean;
@@ -289,9 +268,9 @@ export interface AnalystStat {
   nome: string;
   hoje: number;
   total: number;
-  mediaTempo: number;          // Tempo médio do processo (s) por item
-  tempoMedioCicloMin: number;  // Intervalo médio entre conclusões (min/item: A -> B -> C...)
-  capacidadeEstimadaDia: number; // Projeção de itens/dia
+  mediaTempo: number;
+  tempoMedioCicloMin: number;
+  capacidadeEstimadaDia: number;
 }
 
 export interface ModelStat {
@@ -303,13 +282,9 @@ export interface ModelStat {
   percent: number;
 }
 
-/** Dado de 1 barra do gráfico de distribuição "Dias desde o Mapeamento" (tp_map). */
 export interface TpMapBucket {
-  /** Dias úteis desde o mapeamento (0 = hoje, 1 = 1 dia útil atrás, ...) */
   dias: number;
-  /** Quantidade de itens nessa "faixa" de dias */
   quantidade: number;
-  /** Rótulo amigável: "Hoje" | "1 dia útil" | "2 dias úteis" | "30+ dias úteis" etc. */
   label: string;
 }
 
@@ -317,82 +292,155 @@ export interface DashboardData {
   stats: StatsTp;
   analistas: AnalystStat[];
   modelos: ModelStat[];
-  /** Rótulo do período selecionado pelo usuário (null = sem filtro) */
   periodLabel: string | null;
-  /** Número de itens mapeados/em andamento DENTRO do período (exclui filtro) */
   periodTotalItems: number;
-  /** ⬇️ NOVOS CAMPOS */
-  /** Distribuição de itens concluídos por dias úteis (gráfico de barras do tp_map) */
   tpMapDistribution: TpMapBucket[];
-  /** Lista de DATAS EXATAS de mapeamento (YYYY-MM-DD, fuso local)
-   *  com contagem de itens naquele dia. Usado para o FILTRO de dia exato. */
   mappingDates: { data: string; quantidade: number }[];
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// CACHE EM MEMÓRIA (TTL) — Reduz 70%+ das requisições repetidas
-// ═══════════════════════════════════════════════════════════════════
-// NÃO afeta writes: todo save chama invalidateCachesAferWrite()
-// Todas as consultas usam o valor do cache enquanto for válido.
+export interface DashboardDateRange {
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface SkusReportFilters {
+  search?: string;
+  modelo?: string;
+  status?: string;
+  responsavel?: string;
+  dataInicio?: string;
+  dataFim?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+// ── In-Memory Cache (TTL) ──────────────────────────────────────────
 type CacheEntry<T> = { data: T; expiry: number };
 
 const CACHE = {
   stats: null as CacheEntry<StatsTp> | null,
-  resumoLoc: new Map<string, CacheEntry<LocacaoResumo[]>>(), // key = filtro
+  resumoLoc: new Map<string, CacheEntry<LocacaoResumo[]>>(),
   uniqueModels: null as CacheEntry<string[]> | null,
   uniqueAnalysts: null as CacheEntry<string[]> | null,
-  // Flag: já tentamos usar a view SQL nesta sessão? (evita retry de erro a cada chamada)
-  viewStatsAvailable: null as boolean | null,
-  viewResumoLocAvailable: null as boolean | null,
+  allSkus: null as CacheEntry<SkuTp[]> | null,
 };
 
-// TTLs conservadores — leitura não crítica para atualização instantânea
 const TTL = {
-  STATS_MS: 30_000,          // 30s  → KPIs do painel
-  RESUMO_LOC_MS: 20_000,     // 20s  → Resumo por locação (muito pesado)
-  UNIQUE_MODEL_MS: 120_000,  // 2min → Lista de modelos únicos (nunca muda!)
-  UNIQUE_ANALYS_MS: 60_000,   // 1min → Lista de analistas únicos
+  STATS_MS: 30_000,
+  RESUMO_LOC_MS: 30_000,
+  UNIQUE_MODEL_MS: 120_000,
+  UNIQUE_ANALYS_MS: 60_000,
+  ALL_SKUS_MS: 20_000,
 };
 
-/** Invalidar TODOS os caches — chamar APENAS após um save bem-sucedido. */
 export function invalidateCachesAfterWrite(): void {
   CACHE.stats = null;
   CACHE.resumoLoc.clear();
-  // uniqueModels / uniqueAnalysts não precisam ser invalidados em saves
+  CACHE.allSkus = null;
 }
 
-/** Helper: retorna valor do cache se ainda for válido */
 function cacheGet<T>(entry: CacheEntry<T> | null): T | null {
   if (!entry) return null;
   if (Date.now() > entry.expiry) return null;
   return entry.data;
 }
-function cacheSet<T>(entryRef: { current?: any } | null, key: 'stats' | 'uniqueModels' | 'uniqueAnalysts', value: T, ttlMs: number): T {
+
+function cacheSet<T>(_unused: any, key: 'stats' | 'uniqueModels' | 'uniqueAnalysts' | 'allSkus', value: T, ttlMs: number): T {
   (CACHE as any)[key] = { data: value, expiry: Date.now() + ttlMs };
   return value;
 }
 
-// ── Funções de acesso ──────────────────────────────────────────────
+/** Calcula dias úteis entre uma data e hoje (seg-sex) */
+export function contarDiasUteisLocal(dataMapStr: string): number {
+  try {
+    const inicio = new Date(dataMapStr);
+    const fim = new Date();
+    let count = 0;
+    const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate());
+    const f = new Date(fim.getFullYear(), fim.getMonth(), fim.getDate());
+    while (d <= f) {
+      const dw = d.getDay();
+      if (dw !== 0 && dw !== 6) count++;
+      d.setDate(d.getDate() + 1);
+    }
+    return Math.max(0, count - 1);
+  } catch {
+    return 0;
+  }
+}
 
-/** Busca todos os itens de um KD pela CHAVE do QR Code (normaliza espaços) */
+/** Normaliza documento do Firestore para objeto SkuTp */
+function normalizeSkuDoc(docData: any): SkuTp {
+  const d = { ...docData };
+  if (d.data_map?.toDate) d.data_map = d.data_map.toDate().toISOString();
+  if (d.created_at?.toDate) d.created_at = d.created_at.toDate().toISOString();
+  if (d.updated_at?.toDate) d.updated_at = d.updated_at.toDate().toISOString();
+  return d as SkuTp;
+}
+
+/** Carrega todos os SKUs da coleção Firestore (com cache curto em memória) */
+async function loadAllSkus(): Promise<SkuTp[]> {
+  const cached = cacheGet<SkuTp[]>(CACHE.allSkus);
+  if (cached) return cached;
+
+  const snap = await getDocs(collection(db, 'sku_tp'));
+  const list = snap.docs.map(d => normalizeSkuDoc(d.data()));
+  return cacheSet<SkuTp[]>(null, 'allSkus', list, TTL.ALL_SKUS_MS);
+}
+
+// ── Funções de Consulta e Gravação ─────────────────────────────────
+
+/** Busca todos os itens de um KD pela CHAVE do QR Code */
 export async function getItensByChave(rawChave: string): Promise<(SaldoEstoque & { tp: SkuTp | null })[]> {
-  const chave = rawChave.replace(/\s+/g, '').toUpperCase().trim();
+  const chaveNorm = rawChave.replace(/\s+/g, '').replace(/\//g, '_').toUpperCase().trim();
+  const rawClean = rawChave.trim();
 
-  const { data: saldo, error } = await supabase
-    .from('saldo_estoque')
-    .select('*')
-    .eq('chave', chave);
+  // 1. Busca direta por Document ID (chave_norm) - Leitura O(1) instantânea
+  const docRef = doc(db, 'saldo_estoque', chaveNorm);
+  const snap = await getDoc(docRef);
 
-  if (error) throw error;
-  if (!saldo || saldo.length === 0) return [];
+  let saldo: SaldoEstoque[] = [];
 
-  const skus = [...new Set(saldo.map(s => s.sku))];
-  const { data: tpData } = await supabase
-    .from('sku_tp')
-    .select('*')
-    .in('sku', skus);
+  if (snap.exists()) {
+    const data = snap.data();
+    if (data.itens && Array.isArray(data.itens)) {
+      saldo = data.itens;
+    } else if (data.sku) {
+      saldo = [data as SaldoEstoque];
+    }
+  }
 
-  const tpMap = new Map((tpData || []).map(t => [t.sku, t]));
+  // Se não achou por ID direto, busca por query
+  if (saldo.length === 0) {
+    let q = query(collection(db, 'saldo_estoque'), where('chave_norm', '==', chaveNorm));
+    let qSnap = await getDocs(q);
+    if (qSnap.empty) {
+      q = query(collection(db, 'saldo_estoque'), where('chave', '==', rawClean));
+      qSnap = await getDocs(q);
+    }
+    qSnap.docs.forEach(d => {
+      const data = d.data();
+      if (data.itens && Array.isArray(data.itens)) {
+        saldo.push(...data.itens);
+      } else if (data.sku) {
+        saldo.push(data as SaldoEstoque);
+      }
+    });
+  }
+
+  if (saldo.length === 0) return [];
+
+  const skus = [...new Set(saldo.map(s => s.sku).filter(Boolean))];
+
+  // Busca dados de mapeamento de cada SKU correspondente
+  const tpMap = new Map<string, SkuTp>();
+  await Promise.all(skus.map(async (sku) => {
+    const docId = sku.trim().replace(/\//g, '_');
+    const tpSnap = await getDoc(doc(db, 'sku_tp', docId));
+    if (tpSnap.exists()) {
+      tpMap.set(sku, normalizeSkuDoc(tpSnap.data()));
+    }
+  }));
 
   return saldo.map(s => ({
     ...s,
@@ -400,61 +448,42 @@ export async function getItensByChave(rawChave: string): Promise<(SaldoEstoque &
   }));
 }
 
-/** Busca resumo por locação (saldo_estoque x sku_tp pendentes de mapeamento)
- *  COM CACHE: evita baixar TABELA INTEIRA repetidamente em cada montagem de tela / polling. */
+/** Busca resumo por locação (saldo_estoque x sku_tp pendentes) */
 export async function getResumoLocacoes(filterLocacao?: string): Promise<LocacaoResumo[]> {
   const cacheKey = (filterLocacao || '').trim().toLowerCase() || '__ALL__';
-  const cachedMap = CACHE.resumoLoc.get(cacheKey);
-  if (cachedMap && Date.now() < cachedMap.expiry) return cachedMap.data;
+  const cached = CACHE.resumoLoc.get(cacheKey);
+  if (cached && Date.now() < cached.expiry) return cached.data;
+
+  // Carrega saldo de estoque e SKUs simultaneamente
+  const [saldoSnap, allSkus] = await Promise.all([
+    getDocs(collection(db, 'saldo_estoque')),
+    loadAllSkus()
+  ]);
 
   let allSaldo: SaldoEstoque[] = [];
-  let page = 0;
-  const pageSize = 1000;
-  let hasMore = true;
-
-  while (hasMore && page < 50) {
-    let query = supabase
-      .from('saldo_estoque')
-      .select('*')
-      .range(page * pageSize, (page + 1) * pageSize - 1);
-
-    if (filterLocacao && filterLocacao.trim()) {
-      query = query.ilike('locacao', `%${filterLocacao.trim()}%`);
+  saldoSnap.docs.forEach(d => {
+    const data = d.data();
+    if (data.itens && Array.isArray(data.itens)) {
+      allSaldo.push(...data.itens);
+    } else if (data.sku) {
+      allSaldo.push(data as SaldoEstoque);
     }
+  });
 
-    const { data, error } = await query;
-    if (error || !data || data.length === 0) {
-      hasMore = false;
-    } else {
-      allSaldo = allSaldo.concat(data);
-      if (data.length < pageSize) {
-        hasMore = false;
-      } else {
-        page++;
-      }
-    }
+  if (filterLocacao && filterLocacao.trim()) {
+    const f = filterLocacao.trim().toLowerCase();
+    allSaldo = allSaldo.filter(s => (s.locacao || '').toLowerCase().includes(f));
   }
 
   if (allSaldo.length === 0) {
-    const empty: LocacaoResumo[] = [];
-    CACHE.resumoLoc.set(cacheKey, { data: empty, expiry: Date.now() + TTL.RESUMO_LOC_MS });
-    return empty;
+    CACHE.resumoLoc.set(cacheKey, { data: [], expiry: Date.now() + TTL.RESUMO_LOC_MS });
+    return [];
   }
 
-  const skus = [...new Set(allSaldo.map(s => s.sku).filter(Boolean))];
-  
   const tpMap = new Map<string, SkuTp>();
-  for (let i = 0; i < skus.length; i += 1000) {
-    const chunk = skus.slice(i, i + 1000);
-    const { data: tpData } = await supabase
-      .from('sku_tp')
-      .select('*')
-      .in('sku', chunk);
-
-    if (tpData) {
-      tpData.forEach(t => tpMap.set(t.sku, t));
-    }
-  }
+  allSkus.forEach(t => {
+    if (t.sku) tpMap.set(t.sku, t);
+  });
 
   const locMap = new Map<string, LocacaoResumo>();
 
@@ -499,79 +528,28 @@ export async function getResumoLocacoes(filterLocacao?: string): Promise<Locacao
   return result;
 }
 
-/** Busca estatísticas globais de progresso
- *  1) Primeiro: retorna cache em memória (se válido) → 0 requisições!
- *  2) Depois: TENTA SQL VIEW `stats_tp_view` (criada via migration) → 1 LINHA, ~8.600x mais leve.
- *  3) Fallback: método antigo (baixa tabela inteira) se a View ainda não existir. */
+/** Busca estatísticas globais de progresso */
 export async function getStatsTp(): Promise<StatsTp> {
   const cached = cacheGet<StatsTp>(CACHE.stats);
   if (cached) return cached;
 
-  // 2ª tentativa: SQL VIEW (se disponível)
-  if (CACHE.viewStatsAvailable !== false) {
-    try {
-      const { data, error } = await supabase
-        .from('stats_tp_view')
-        .select('total, concluidos, andamento, pendentes')
-        .limit(1)
-        .maybeSingle();
-      if (!error && data) {
-        CACHE.viewStatsAvailable = true;
-        const result: StatsTp = {
-          total: Number(data.total) || 8643,
-          concluidos: Number(data.concluidos) || 0,
-          andamento: Number(data.andamento) || 0,
-          pendentes: Number(data.pendentes) || (Number(data.total) || 8643),
-        };
-        // Garante coerência: total = soma dos 3 status
-        result.pendentes = Math.max(0, result.total - result.concluidos - result.andamento);
-        return cacheSet<StatsTp>(null, 'stats', result, TTL.STATS_MS);
-      }
-      // View não existe → marca para não tentar de novo nesta sessão
-      if (error && /relation.*does not exist|does not exist/i.test(String(error.message || error))) {
-        CACHE.viewStatsAvailable = false;
-      }
-    } catch {
-      CACHE.viewStatsAvailable = false;
-    }
-  }
-
-  // 3ª tentativa: Fallback = método original (baixa tabela inteira)
-  const { data, count, error } = await supabase
-    .from('sku_tp')
-    .select('status', { count: 'exact' });
-
-  if (error || !data) {
-    const fallback = { total: 8643, concluidos: 0, andamento: 0, pendentes: 8643 };
-    return cacheSet<StatsTp>(null, 'stats', fallback, TTL.STATS_MS);
-  }
-
-  const total = count || data.length || 8643;
+  const data = await loadAllSkus();
+  const total = data.length;
   const concluidos = data.filter(d => d.status === 'mapeado').length;
   const andamento = data.filter(d => d.status === 'andamento').length;
-  const pendentes = total - concluidos - andamento;
+  const pendentes = Math.max(0, total - concluidos - andamento);
 
   const result = { total, concluidos, andamento, pendentes };
   return cacheSet<StatsTp>(null, 'stats', result, TTL.STATS_MS);
 }
 
-/** Busca analítica completa para o Dashboard (Produtividade por analista e Resumo por modelo) */
-export interface DashboardDateRange {
-  /** 'YYYY-MM-DD' no fuso LOCAL (Manaus). Se vazio, não limita início. */
-  startDate?: string;
-  /** 'YYYY-MM-DD' no fuso LOCAL (Manaus). Se vazio, não limita fim. */
-  endDate?: string;
-}
-
+/** Busca analítica completa para o Dashboard */
 export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Promise<DashboardData> {
-  // Converte datas do filtro (fuso LOCAL) → limites de timestamp em UTC
-  // que usaremos p/ decidir se um item entra na contagem de produtividade do período.
   const gteTs = dateRange?.startDate ? new Date(localStartOfDayToUtcIso(dateRange.startDate)).getTime() : -Infinity;
   const lteTs = dateRange?.endDate   ? new Date(localEndOfDayToUtcIso(dateRange.endDate)).getTime()   :  Infinity;
   const hasFilter = (dateRange?.startDate != null && dateRange.startDate !== '') ||
                     (dateRange?.endDate   != null && dateRange.endDate   !== '');
 
-  // Rótulo que vai no card do analista no lugar de "Hoje" quando filtro ativo
   const periodLabel = (() => {
     if (!hasFilter) return null;
     const s = dateRange?.startDate;
@@ -580,32 +558,7 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
     return 'No Período';
   })();
 
-  // Supabase PostgREST limita a 1.000 linhas por requisição por padrão.
-  // Fazemos paginação em lote de 1.000 para carregar TODOS os 18.000+ SKUs!
-  let allData: any[] = [];
-  let page = 0;
-  const pageSize = 1000;
-  let hasMore = true;
-
-  while (hasMore && page < 50) { // limite de segurança 50k linhas
-    const { data: pageData, error } = await supabase
-      .from('sku_tp')
-      .select('id, sku, modelo, responsavel, status, tempo_total, updated_at, data_map, tp_map')
-      .range(page * pageSize, (page + 1) * pageSize - 1);
-
-    if (error || !pageData || pageData.length === 0) {
-      hasMore = false;
-    } else {
-      allData = allData.concat(pageData);
-      if (pageData.length < pageSize) {
-        hasMore = false;
-      } else {
-        page++;
-      }
-    }
-  }
-
-  const data = allData;
+  const data = await loadAllSkus();
 
   if (!data || data.length === 0) {
     return {
@@ -619,22 +572,12 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
     };
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // KPI Cards do topo (TOTAL GERAL DA ESTRUTURA — ignoram filtro
-  // de data, pois representam o "estado atual do trabalho")
-  // ═══════════════════════════════════════════════════════════════
   const total = data.length;
   const concluidos = data.filter(d => d.status === 'mapeado').length;
   const andamento = data.filter(d => d.status === 'andamento').length;
-  const pendentes = total - concluidos - andamento;
-
-  // Usa DATA LOCAL DO NAVEGADOR (não UTC) para bater com fusos como Manaus (UTC-4)
-  // ex: 22:00 do dia 27 local = 02:00 dia 28 UTC — queremos "hoje" = dia 27
+  const pendentes = Math.max(0, total - concluidos - andamento);
   const todayStr = localDateKey(new Date());
 
-  // Predicado: UM ITEM CONTA NA PRODUTIVIDADE DO PERÍODO?
-  // Sem filtro → sempre true (todo o histórico).
-  // Com filtro → requer updated_at (tempo em ms) DENTRO de [gteTs, lteTs].
   const inPeriod = (item: any) => {
     if (!hasFilter) return true;
     if (!item.updated_at) return false;
@@ -642,7 +585,7 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
     return ts >= gteTs && ts <= lteTs;
   };
 
-  // 1. Agrupamento por Analista (responsavel)
+  // 1. Analistas
   const analistasMap = new Map<string, { hoje: number; total: number; tempos: number[]; timestamps: number[] }>();
   let periodTotalItems = 0;
 
@@ -656,8 +599,6 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
       const st = analistasMap.get(name)!;
       st.total += 1;
       if (item.updated_at) {
-        // ATENÇÃO: updated_at no banco está em UTC. Para comparar "hoje" com
-        // dia local Manaus, converte o timestamp UTC → chave de data local antes.
         if (localDateKey(item.updated_at) === todayStr) {
           st.hoje += 1;
         }
@@ -670,12 +611,10 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
   });
 
   const analistas: AnalystStat[] = Array.from(analistasMap.entries()).map(([nome, st]) => {
-    // Média de tempo cronometrado da peça (segundos)
     const avgTempoProcesso = st.tempos.length > 0
       ? Number((st.tempos.reduce((a, b) => a + b, 0) / st.tempos.length).toFixed(2))
       : 0;
 
-    // Cálculo do tempo entre o item A -> B -> C... (minutos de intervalo entre registros)
     let tempoMedioCicloMin = 0;
     if (st.timestamps.length > 1) {
       const sortedTs = [...st.timestamps].sort((a, b) => a - b);
@@ -683,7 +622,6 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
       for (let i = 1; i < sortedTs.length; i++) {
         const diffMs = sortedTs[i] - sortedTs[i - 1];
         const diffMin = diffMs / (1000 * 60);
-        // Desconsidera intervalos maiores que 45 min (pausas de almoço/turnos)
         if (diffMin > 0.05 && diffMin <= 45) {
           intervalsMin.push(diffMin);
         }
@@ -693,12 +631,10 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
       }
     }
 
-    // Se não houver histórico de datas suficiente, estima pelo tempo cronometrado + 1,5 min de manuseio/troca
     if (tempoMedioCicloMin === 0) {
       tempoMedioCicloMin = Number(((avgTempoProcesso / 60) + 1.5).toFixed(1));
     }
 
-    // Projeção diária por analista (Jornada útil de 7h = 420 min / ritmo por item)
     const capacidadeEstimadaDia = tempoMedioCicloMin > 0 ? Math.round(420 / tempoMedioCicloMin) : 0;
 
     return {
@@ -711,12 +647,8 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
     };
   }).sort((a, b) => b.total - a.total);
 
-  // 2. Agrupamento por Modelo (modelo)
-  // Com filtro de data: considera SOMENTE os itens do PERÍODO filtrado
-  // (mostra modelos "ativos" em produtividade durante o período)
-  // Sem filtro: mostra TUDO (100% da estrutura atual)
+  // 2. Modelos
   const modelosMap = new Map<string, { total: number; mapeados: number; andamento: number; pendentes: number }>();
-
   data.forEach(item => {
     if (hasFilter && !inPeriod(item)) return;
     const mod = (item.modelo || 'Sem Modelo').trim().toUpperCase();
@@ -739,51 +671,24 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
     percent: m.total > 0 ? Number(((m.mapeados / m.total) * 100).toFixed(1)) : 0
   })).sort((a, b) => b.total - a.total);
 
-  // 3. ═══════════════════════════════════════════════════════════
-  // GRÁFICO DE DISTRIBUIÇÃO: "Dias úteis desde o Mapeamento" (tp_map)
-  // Agrupa itens CONCLUÍDOS por buckets de dias úteis.
-  //    Bucket 0 → Hoje
-  //    Bucket 1 → 1 dia útil atrás
-  //    Bucket 2 → 2 dias úteis atrás
-  //    ...
-  //    Bucket 30+ → Tudo o que tem 30+ dias úteis (acumula para o gráfico não ficar gigante)
-  // ═══════════════════════════════════════════════════════════════
+  // 3. Distribuição Tp Map (dias úteis)
   const MAX_BUCKET = 30;
   const tpCounter = new Map<number, number>();
 
-  const contarDiasUteisLocal = (dataMapStr: string): number => {
-    const inicio = new Date(dataMapStr);
-    const fim = new Date();
-    let count = 0;
-    const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate());
-    const f = new Date(fim.getFullYear(), fim.getMonth(), fim.getDate());
-    while (d <= f) {
-      const dw = d.getDay(); // 0=dom, 6=sab
-      if (dw !== 0 && dw !== 6) count++;
-      d.setDate(d.getDate() + 1);
-    }
-    return Math.max(0, count - 1); // "hoje" = 0 dias corridos
-  };
-
   data.forEach(item => {
     if (item.status !== 'mapeado') return;
-    // Usa tp_map do banco (calculado pelo trigger) se existir.
-    // Caso contrário, fallback: calcula no frontend (mesma regra de dias úteis).
     let dias: number;
     if (typeof item.tp_map === 'number' && isFinite(item.tp_map)) {
       dias = item.tp_map;
     } else if (item.data_map) {
-      try { dias = contarDiasUteisLocal(item.data_map); }
-      catch { dias = 0; }
+      dias = contarDiasUteisLocal(item.data_map);
     } else {
-      return; // sem data de mapeamento, não entra no gráfico
+      return;
     }
     const bucket = dias >= MAX_BUCKET ? MAX_BUCKET : dias;
     tpCounter.set(bucket, (tpCounter.get(bucket) || 0) + 1);
   });
 
-  // Constrói o array final do gráfico com todos os buckets de 0..MAX_BUCKET
-  // (mesmo os que têm 0, para o eixo X ficar completo)
   const tpMapDistribution: TpMapBucket[] = [];
   for (let d = 0; d <= MAX_BUCKET; d++) {
     const qty = tpCounter.get(d) || 0;
@@ -794,10 +699,7 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
     tpMapDistribution.push({ dias: d, quantidade: qty, label });
   }
 
-  // 4. ═══════════════════════════════════════════════════════════
-  // FILTRO DE DIA EXATO: lista de datas únicas de mapeamento
-  // (data_map no fuso LOCAL = chave YYYY-MM-DD do navegador)
-  // ═══════════════════════════════════════════════════════════════
+  // 4. Datas de Mapeamento
   const datesCounter = new Map<string, number>();
   data.forEach(item => {
     if (item.status !== 'mapeado' || !item.data_map) return;
@@ -806,9 +708,10 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
       datesCounter.set(k, (datesCounter.get(k) || 0) + 1);
     } catch {}
   });
+
   const mappingDates = Array.from(datesCounter.entries())
-    .map(([data, quantidade]) => ({ data, quantidade }))
-    .sort((a, b) => b.data.localeCompare(a.data)); // mais recente primeiro
+    .map(([d, quantidade]) => ({ data: d, quantidade }))
+    .sort((a, b) => b.data.localeCompare(a.data));
 
   return {
     stats: { total, concluidos, andamento, pendentes },
@@ -821,141 +724,85 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
   };
 }
 
-/** Busca lista de SKUs com suporte a filtro e busca por código/descrição */
+/** Busca lista de SKUs com filtro de texto */
 export async function getSkusList(search: string = '', limit: number = 50): Promise<SkuTp[]> {
-  let query = supabase
-    .from('sku_tp')
-    .select('*')
-    .order('id', { ascending: true })
-    .limit(limit);
+  const all = await loadAllSkus();
+  if (!search.trim()) return all.slice(0, limit);
 
-  if (search.trim()) {
-    const s = search.trim();
-    query = query.or(`sku.ilike.%${s}%,descricao.ilike.%${s}%`);
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('Erro ao buscar lista de SKUs:', error);
-    return [];
-  }
-  return data || [];
+  const s = search.trim().toLowerCase();
+  return all.filter(item =>
+    (item.sku || '').toLowerCase().includes(s) ||
+    (item.descricao || '').toLowerCase().includes(s)
+  ).slice(0, limit);
 }
 
-export interface SkusReportFilters {
-  search?: string;
-  modelo?: string;
-  status?: string;
-  responsavel?: string;
-  dataInicio?: string; // YYYY-MM-DD
-  dataFim?: string;    // YYYY-MM-DD
-  page?: number;
-  pageSize?: number;
-}
-
-/** Busca itens para o Relatório com filtros avançados + paginação */
-export async function getSkusReport(
-  filters: SkusReportFilters = {}
-): Promise<{ data: SkuTp[]; total: number }> {
+/** Relatório de SKUs com filtros e paginação */
+export async function getSkusReport(filters: SkusReportFilters = {}): Promise<{ data: SkuTp[]; total: number }> {
   const { search, modelo, status, responsavel, dataInicio, dataFim, page = 0, pageSize = 50 } = filters;
+  const all = await loadAllSkus();
 
-  let query = supabase
-    .from('sku_tp')
-    .select('*', { count: 'exact' })
-    .order('sku', { ascending: true });
+  const gte = dataInicio ? localStartOfDayToUtcIso(dataInicio) : null;
+  const lte = dataFim ? localEndOfDayToUtcIso(dataFim) : null;
+  const s = search?.trim().toLowerCase();
+  const m = modelo?.trim().toLowerCase();
+  const r = responsavel?.trim().toLowerCase();
 
-  if (search?.trim()) {
-    const s = search.trim();
-    query = query.or(`sku.ilike.%${s}%,descricao.ilike.%${s}%`);
-  }
-  if (modelo?.trim()) query = query.ilike('modelo', `%${modelo.trim()}%`);
-  if (status?.trim()) query = query.eq('status', status.trim());
-  if (responsavel?.trim()) query = query.ilike('responsavel', `%${responsavel.trim()}%`);
-  // IMPORTANTE: dataInicio e dataFim chegam como "YYYY-MM-DD" no fuso LOCAL do usuário.
-  // No banco, data_map está armazenado como ISO UTC via new Date().toISOString().
-  // Precisamos converter:
-  //   dataInicio = "2026-07-28" Manaus → UTC = 2026-07-28T04:00:00.000Z  (gte)
-  //   dataFim    = "2026-07-28" Manaus → UTC = 2026-07-29T03:59:59.999Z  (lte)
-  const gte = localStartOfDayToUtcIso(dataInicio || '');
-  const lte = localEndOfDayToUtcIso(dataFim || '');
-  if (gte) query = query.gte('data_map', gte);
-  if (lte) query = query.lte('data_map', lte);
+  const filtered = all.filter(item => {
+    if (s) {
+      const matchSku = (item.sku || '').toLowerCase().includes(s);
+      const matchDesc = (item.descricao || '').toLowerCase().includes(s);
+      if (!matchSku && !matchDesc) return false;
+    }
+    if (m && !(item.modelo || '').toLowerCase().includes(m)) return false;
+    if (status && item.status !== status) return false;
+    if (r && !(item.responsavel || '').toLowerCase().includes(r)) return false;
+    if (gte && (!item.data_map || item.data_map < gte)) return false;
+    if (lte && (!item.data_map || item.data_map > lte)) return false;
+    return true;
+  });
 
-  query = query.range(page * pageSize, (page + 1) * pageSize - 1);
+  // Ordena por SKU
+  filtered.sort((a, b) => (a.sku || '').localeCompare(b.sku || ''));
 
-  const { data, count, error } = await query;
-  if (error) {
-    console.error('Erro ao buscar relatório de SKUs:', error);
-    return { data: [], total: 0 };
-  }
-  return { data: data || [], total: count || 0 };
+  const start = page * pageSize;
+  const pagedData = filtered.slice(start, start + pageSize);
+
+  return { data: pagedData, total: filtered.length };
 }
 
-/** Busca lista de modelos únicos para o filtro (paginado para pegar todos os 8.600+ SKUs)
- *  COM CACHE: Modelos NUNCA mudam em tempo real — 2min de TTL elimina dezenas de requisições. */
+/** Lista de modelos únicos */
 export async function getUniqueModels(): Promise<string[]> {
   const cached = cacheGet<string[]>(CACHE.uniqueModels);
   if (cached) return cached;
 
-  let allModels: string[] = [];
-  let page = 0;
-  let hasMore = true;
+  const all = await loadAllSkus();
+  const set = new Set<string>();
+  all.forEach(item => {
+    if (item.modelo && item.modelo.trim()) set.add(item.modelo.trim());
+  });
 
-  while (hasMore && page < 20) {
-    const { data, error } = await supabase
-      .from('sku_tp')
-      .select('modelo')
-      .not('modelo', 'is', null)
-      .range(page * 1000, (page + 1) * 1000 - 1);
-
-    if (error || !data || data.length === 0) {
-      hasMore = false;
-    } else {
-      data.forEach(d => { if (d.modelo) allModels.push(d.modelo.trim()); });
-      if (data.length < 1000) hasMore = false;
-      else page++;
-    }
-  }
-
-  const result = [...new Set(allModels)].sort();
+  const result = Array.from(set).sort();
   return cacheSet<string[]>(null, 'uniqueModels', result, TTL.UNIQUE_MODEL_MS);
 }
 
-/** Busca lista de analistas únicos para o filtro (paginado para pegar todos os 8.600+ SKUs)
- *  COM CACHE: 1min de TTL (evita consulta repetida a cada abertura do filtro). */
+/** Lista de analistas únicos */
 export async function getUniqueAnalysts(): Promise<string[]> {
   const cached = cacheGet<string[]>(CACHE.uniqueAnalysts);
   if (cached) return cached;
 
-  let allAnalysts: string[] = [];
-  let page = 0;
-  let hasMore = true;
+  const all = await loadAllSkus();
+  const set = new Set<string>();
+  all.forEach(item => {
+    if (item.responsavel && item.responsavel.trim()) set.add(item.responsavel.trim());
+  });
 
-  while (hasMore && page < 20) {
-    const { data, error } = await supabase
-      .from('sku_tp')
-      .select('responsavel')
-      .not('responsavel', 'is', null)
-      .range(page * 1000, (page + 1) * 1000 - 1);
-
-    if (error || !data || data.length === 0) {
-      hasMore = false;
-    } else {
-      data.forEach(d => { if (d.responsavel) allAnalysts.push(d.responsavel.trim()); });
-      if (data.length < 1000) hasMore = false;
-      else page++;
-    }
-  }
-
-  const result = [...new Set(allAnalysts)].sort();
+  const result = Array.from(set).sort();
   return cacheSet<string[]>(null, 'uniqueAnalysts', result, TTL.UNIQUE_ANALYS_MS);
 }
 
-
-/** Salva as tomadas de um sub-processo específico de um SKU no Supabase.
- *  PROTEÇÃO CONCORRÊNCIA: Sempre lê a versão MAIS RECENTE do banco imediatamente antes
- *  de escrever (evita sobrepor gravações de outros analistas feitas enquanto este cliente
- *  estava com dados em cache). Usa operações de MERGE campo-a-campo.
+/**
+ * Salva as tomadas de um sub-processo específico de um SKU no Firestore.
+ * Protegido contra concorrência por leitura prévia do banco e merge seguro.
  */
 export async function saveSubProcessMeasurements(
   sku: string,
@@ -963,51 +810,42 @@ export async function saveSubProcessMeasurements(
   operatorName: string = 'Operador',
   maxRetries: number = 3
 ): Promise<SkuTp | null> {
-  let lastErr: any = null;
+  const docId = sku.trim().replace(/\//g, '_');
+  const docRef = doc(db, 'sku_tp', docId);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      // 1) BUSCA FRESCA DO BANCO (nunca usa cache de client aqui)
-      const { data: current, error: errSel } = await supabase
-        .from('sku_tp')
-        .select('*')
-        .eq('sku', sku)
-        .single();
-
-      if (errSel && !current) throw errSel;
+      const snap = await getDoc(docRef);
+      const currentTp = snap.exists() ? normalizeSkuDoc(snap.data()) : { sku, status: 'pendente' as const };
 
       const now = new Date();
-      const dataMapStr = now.toISOString();
-
-      const currentTp: any = current || { sku, status: 'pendente' };
-
-      // 2) MERGE CAMPO-A-CAMPO: só atualiza campos em updateFields que tem VALOR EXPLÍCITO (null também vale = apagar tomada).
-      // Campos não mencionados em updateFields → mantém valor do banco (evita sobrepor writes concorrentes).
       const merged: any = { ...currentTp };
       for (const k of Object.keys(updateFields)) {
         merged[k] = (updateFields as any)[k];
       }
       merged.responsavel = operatorName;
-      merged.data_map = dataMapStr;
       merged.updated_at = now.toISOString();
 
-      // 3) Recalcula status com base nos valores do banco + campos novos aplicados
+      // Recalcula status
       const spKeys = ['pegar_ik_t1', 'abrir_t1', 'form_t1', 'desc_t1', 'etq_t1', 'pos_t1'];
       const hasSome = spKeys.some(k => merged[k] != null);
       const hasAll = spKeys.every(k => merged[k] != null);
 
-      const jaMapeado = currentTp.status === 'mapeado';
-      if (jaMapeado) {
+      if (currentTp.status === 'mapeado' || hasAll) {
         merged.status = 'mapeado';
-      } else if (hasAll) {
-        merged.status = 'mapeado';
+        if (!merged.data_map) merged.data_map = now.toISOString();
       } else if (hasSome) {
         merged.status = 'andamento';
       } else {
         merged.status = currentTp.status || 'pendente';
       }
 
-      // 4) Recalcula tempo_total com base nos *_res frescos
+      // Recalcula tp_map (dias úteis) no status mapeado
+      if (merged.status === 'mapeado' && merged.data_map) {
+        merged.tp_map = contarDiasUteisLocal(merged.data_map);
+      }
+
+      // Recalcula tempo_total
       let total = 0;
       ['abrir_res', 'form_res', 'desc_res', 'etq_res', 'pos_res', 'pegar_ik_res'].forEach(resKey => {
         const val = merged[resKey];
@@ -1016,36 +854,22 @@ export async function saveSubProcessMeasurements(
       merged.tempo_total = Number(total.toFixed(2));
 
       const cleanMerged = sanitizeSkuTpPayload(merged, false);
+      await setDoc(docRef, cleanMerged, { merge: true });
 
-      // 5) UPSERT com retorno da linha mais recente do banco
-      const { data: updated, error } = await supabase
-        .from('sku_tp')
-        .upsert(cleanMerged, { onConflict: 'sku' })
-        .select('*')
-        .single();
-
-      if (error) throw error;
-
-      // ↓ SUCESSO! Invalida caches de leitura para KPIs / resumos refletirem o save
       invalidateCachesAfterWrite();
-      return updated as SkuTp;
+      return cleanMerged as SkuTp;
     } catch (err: any) {
-      lastErr = err;
-      console.warn(`[saveSubProcessMeasurements] Tentativa ${attempt}/${maxRetries} falhou para SKU ${sku}:`, err);
-      if (attempt < maxRetries) {
-        await new Promise(r => setTimeout(r, 150 * attempt)); // backoff linear
+      if (attempt === maxRetries) {
+        console.error(`[saveSubProcessMeasurements] Falha após ${maxRetries} tentativas:`, err);
+        return null;
       }
+      await new Promise(r => setTimeout(r, 150 * attempt));
     }
   }
-
-  console.error(`[saveSubProcessMeasurements] Falhou após ${maxRetries} tentativas para SKU ${sku}:`, lastErr);
   return null;
 }
 
-/** Grava UMA tomada calculando o SLOT VAZIO usando DADOS FRESCOS DO BANCO.
- *  Essa é a função SEGURA para múltiplos analistas — evita sobrescrever tomadas simultâneas.
- *  Retorna SKU atualizado do banco ou null em caso de falha.
- */
+/** Grava UMA tomada no próximo slot vazio no Firestore */
 export async function recordMeasurementSafe(
   sku: string,
   processoId: 'pegar_ik' | 'abrir' | 'form' | 'desc' | 'etq' | 'pos',
@@ -1066,37 +890,27 @@ export async function recordMeasurementSafe(
   if (!keys) return null;
 
   const tVal = Number(tempoSegundos.toFixed(2));
-  let lastErr: any = null;
+  const docId = sku.trim().replace(/\//g, '_');
+  const docRef = doc(db, 'sku_tp', docId);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      // 1) READ FRESH: pega a versão MAIS ATUALIZADA do banco NESTE EXATO MOMENTO
-      const { data: fresh, error: errSel } = await supabase
-        .from('sku_tp')
-        .select('*')
-        .eq('sku', sku)
-        .single();
+      const snap = await getDoc(docRef);
+      const row = snap.exists() ? normalizeSkuDoc(snap.data()) : ({ sku, status: 'pendente' } as any);
 
-      if (errSel && !fresh) throw errSel;
-
-      const row: any = fresh || { sku, status: 'pendente' };
-
-      // 2) CALCULA SLOT VAZIO baseado nos valores DO BANCO (não do cache local!)
       const tKeys = [keys.t1, keys.t2, keys.t3, keys.t4, keys.t5];
       let targetKey = keys.t5;
       for (let i = 0; i < tKeys.length; i++) {
-        const v = row[tKeys[i]];
+        const v = (row as any)[tKeys[i]];
         if (v == null || v === 0) { targetKey = tKeys[i]; break; }
       }
 
-      // 3) Aplica a nova tomada no slot correto, preserva valores das outras tomadas
       const updated: any = { ...row };
       updated[targetKey] = tVal;
       if (qtdUnid != null && !isNaN(qtdUnid)) {
         updated[keys.qtd] = qtdUnid;
       }
 
-      // 4) Recalcula a MÉDIA (_res) baseada nas 5 tomadas DO BANCO + a nova
       const validTs = tKeys
         .map(k => updated[k])
         .filter((v: any) => typeof v === 'number' && v > 0) as number[];
@@ -1105,7 +919,6 @@ export async function recordMeasurementSafe(
         : null;
       updated[keys.res] = avg;
 
-      // 5) Usa saveSubProcessMeasurements que já mergeia, calcula status e tempo_total com retries internos
       const fieldsToSave: Partial<SkuTp> = {};
       (fieldsToSave as any)[targetKey] = tVal;
       (fieldsToSave as any)[keys.res] = avg;
@@ -1115,23 +928,18 @@ export async function recordMeasurementSafe(
 
       const result = await saveSubProcessMeasurements(sku, fieldsToSave, operatorName, 2);
       if (result) return result;
-      throw new Error('saveSubProcessMeasurements retornou null');
     } catch (err: any) {
-      lastErr = err;
-      console.warn(`[recordMeasurementSafe] Tentativa ${attempt}/${maxRetries} falhou (${processoId} @ ${sku}):`, err);
-      if (attempt < maxRetries) {
-        await new Promise(r => setTimeout(r, 200 * attempt + Math.random() * 100));
+      if (attempt === maxRetries) {
+        console.error(`[recordMeasurementSafe] Erro para ${sku}:`, err);
+        return null;
       }
+      await new Promise(r => setTimeout(r, 150 * attempt));
     }
   }
-
-  console.error(`[recordMeasurementSafe] Falhou após ${maxRetries} tentativas (${processoId} @ ${sku}):`, lastErr);
   return null;
 }
 
-/** Remove UMA tomada individual (ex: "pegar_ik_t3") e recalcula a média (_res) do processo no banco.
- *  Retorna SKU atualizado (com valores do banco) ou null em caso de erro.
- */
+/** Remove uma tomada individual e recalcula média */
 export async function clearSingleMeasurement(
   sku: string,
   processoId: 'pegar_ik' | 'abrir' | 'form' | 'desc' | 'etq' | 'pos',
@@ -1149,17 +957,13 @@ export async function clearSingleMeasurement(
   const keys = processKeyMap[processoId];
   if (!keys) return null;
   const slotKey = (keys as any)[`t${slot}`];
-  if (!slotKey) return null;
 
-  const { data: fresh }: any = await supabase
-    .from('sku_tp')
-    .select('*')
-    .eq('sku', sku)
-    .single();
+  const docId = sku.trim().replace(/\//g, '_');
+  const snap = await getDoc(doc(db, 'sku_tp', docId));
+  if (!snap.exists()) return null;
 
-  if (!fresh) return null;
-
-  const newTs = { ...fresh };
+  const fresh = normalizeSkuDoc(snap.data());
+  const newTs: any = { ...fresh };
   newTs[slotKey] = null;
 
   const validTs = [1,2,3,4,5]
@@ -1168,56 +972,73 @@ export async function clearSingleMeasurement(
   const avg = validTs.length > 0
     ? Number((validTs.reduce((a, b) => a + b, 0) / validTs.length).toFixed(2))
     : null;
-  newTs[keys.res] = avg;
 
   const clean: Partial<SkuTp> = {};
   (clean as any)[slotKey] = null;
   (clean as any)[keys.res] = avg;
+
   return await saveSubProcessMeasurements(sku, clean, operatorName);
 }
 
-/** Força um SKU a ter status 'mapeado' (conclusão manual mesmo com processos incompletos) */
+/** Força status como 'mapeado' */
 export async function confirmarMapeamentoForcado(
   sku: string,
   operatorName: string = 'Operador'
 ): Promise<SkuTp | null> {
-  const { data: current } = await supabase
-    .from('sku_tp')
-    .select('*')
-    .eq('sku', sku)
-    .single();
+  const docId = sku.trim().replace(/\//g, '_');
+  const docRef = doc(db, 'sku_tp', docId);
+  const snap = await getDoc(docRef);
 
   const now = new Date();
-  const currentTp = current || { sku, status: 'pendente' };
+  const currentTp = snap.exists() ? normalizeSkuDoc(snap.data()) : ({ sku, status: 'pendente' } as any);
 
-  // Calcula tempo_total atual com base nos valores já salvos
   let total = 0;
   ['abrir_res', 'form_res', 'desc_res', 'etq_res', 'pos_res', 'pegar_ik_res'].forEach(resKey => {
     const val = (currentTp as any)[resKey];
     if (typeof val === 'number') total += val;
   });
 
-  const merged = {
+  const dataMapStr = (currentTp as any).data_map || now.toISOString();
+  const merged: any = {
     ...currentTp,
     tempo_total: Number(total.toFixed(2)),
     status: 'mapeado' as const,
     responsavel: operatorName,
-    data_map: (currentTp as any).data_map || now.toISOString(),
+    data_map: dataMapStr,
+    tp_map: contarDiasUteisLocal(dataMapStr),
     updated_at: now.toISOString()
   };
 
   const cleanMerged = sanitizeSkuTpPayload(merged, false);
+  await setDoc(docRef, cleanMerged, { merge: true });
 
-  const { data: updated, error } = await supabase
-    .from('sku_tp')
-    .upsert(cleanMerged, { onConflict: 'sku' })
-    .select('*')
-    .single();
-
-  if (error) {
-    console.error('Erro ao confirmar mapeamento forçado:', error);
-    return null;
-  }
   invalidateCachesAfterWrite();
-  return updated;
+  return cleanMerged as SkuTp;
 }
+
+// ── Objeto de Compatibilidade `supabase` ───────────────────────────
+// Usado diretamente por componentes legados como ItemsReport
+export const supabase = {
+  from: (collectionName: string) => ({
+    update: (payload: any) => ({
+      eq: (col: string, val: any) => ({
+        select: (_sel?: string) => ({
+          single: async () => {
+            const raw = String(val).trim();
+            const docId = raw.replace(/\//g, '_');
+            const docRef = doc(db, collectionName, docId);
+            const now = new Date().toISOString();
+            const toSave = { ...payload, updated_at: now };
+            if (toSave.status === 'mapeado' && toSave.data_map) {
+              toSave.tp_map = contarDiasUteisLocal(toSave.data_map);
+            }
+            await setDoc(docRef, sanitizeSkuTpPayload(toSave, false), { merge: true });
+            const snap = await getDoc(docRef);
+            invalidateCachesAfterWrite();
+            return { data: normalizeSkuDoc(snap.data()), error: null };
+          }
+        })
+      })
+    })
+  })
+} as any;
