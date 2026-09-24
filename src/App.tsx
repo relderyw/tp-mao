@@ -303,12 +303,12 @@ function AppContent() {
             </nav>
 
             {/* Controles: Tema + User + Logout */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
               {/* Toggle Tema Escuro */}
               <button
                 type="button"
                 onClick={toggleDark}
-                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-sm border ${
+                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center transition-all shadow-sm border ${
                   isDark
                     ? 'bg-[var(--color-dark-card)] border-[var(--color-dark-border)] text-amber-400 hover:bg-[var(--color-dark-border)]'
                     : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
@@ -324,15 +324,15 @@ function AppContent() {
                     transition={{ duration: 0.22 }}
                     className="flex items-center justify-center"
                   >
-                    {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                    {isDark ? <Sun className="w-4 h-4 sm:w-5 sm:h-5" /> : <Moon className="w-4 h-4 sm:w-5 sm:h-5" />}
                   </motion.span>
                 </AnimatePresence>
               </button>
 
               {/* Avatar / Nome do Usuário */}
-              <div className="flex items-center gap-2 pr-3 border-r border-gray-200 dark:border-[var(--color-dark-border)]">
+              <div className="flex items-center gap-2 pr-2 sm:pr-3 border-r border-gray-200 dark:border-[var(--color-dark-border)]">
                 <div
-                  className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0"
+                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0"
                   style={{ background: isAdmin ? (isDark ? '#0284c7' : '#0066b2') : '#3b82f6' }}
                 >
                   {currentUser.displayName.charAt(0).toUpperCase()}
@@ -348,7 +348,7 @@ function AppContent() {
               </div>
               <button
                 onClick={handleLogout}
-                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
+                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center transition-colors ${
                   isDark
                     ? 'text-[var(--color-dark-muted)] hover:text-sky-400 hover:bg-[var(--color-dark-card)]'
                     : 'text-gray-500 hover:text-[#0066b2]'
@@ -357,7 +357,7 @@ function AppContent() {
                 onMouseLeave={e => { if (!isDark) { (e.currentTarget as HTMLButtonElement).style.background = ''; } }}
                 title="Sair"
               >
-                <LogOut className="w-5 h-5" />
+                <LogOut className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
           </div>
@@ -365,7 +365,7 @@ function AppContent() {
       </header>
 
       {/* ── Main Content ── */}
-      <main className="flex-1 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+      <main className="flex-1 w-full max-w-7xl mx-auto p-3 sm:p-6 lg:p-8 pb-28 md:pb-8">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -405,7 +405,7 @@ function AppContent() {
       </main>
 
       {/* ── Mobile Navigation ── */}
-      <nav className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-white/90 dark:bg-[var(--color-dark-surface)]/90 backdrop-blur-md border border-gray-200 dark:border-[var(--color-dark-border)] px-4 py-2 rounded-full shadow-xl z-30 flex gap-2 transition-colors duration-300">
+      <nav className="md:hidden fixed bottom-4 left-1/2 -translate-x-1/2 bg-white/95 dark:bg-[var(--color-dark-surface)]/95 backdrop-blur-md border border-gray-200 dark:border-[var(--color-dark-border)] px-3 py-2 rounded-full shadow-xl z-30 flex gap-1 transition-colors duration-300">
         {tabs.map(tab => (
           <button
             key={tab.id}

@@ -196,11 +196,11 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
   })();
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+    <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto pb-4">
 
       {/* ── Topo: Título + Filtro de Datas + Botão Atualizar ── */}
-      <div className="bg-white dark:bg-[var(--color-dark-surface)] p-6 rounded-3xl border border-slate-100 dark:border-[var(--color-dark-border)] shadow-sm space-y-5 transition-colors duration-300">
-        <div className="flex justify-between items-center flex-wrap gap-3">
+      <div className="bg-white dark:bg-[var(--color-dark-surface)] p-4 sm:p-6 rounded-3xl border border-slate-100 dark:border-[var(--color-dark-border)] shadow-sm space-y-4 transition-colors duration-300">
+        <div className="flex justify-between items-center flex-wrap gap-2">
           <div>
             <h1 className="text-xl font-black text-slate-800 dark:text-[var(--color-dark-text)] tracking-tight flex items-center gap-2">
               <Activity className="w-6 h-6 text-blue-600 dark:text-sky-400" />
@@ -230,8 +230,9 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
           </button>
         </div>
 
-        {/* Filtro de período: presets + inputs */}
-        <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-slate-100 dark:border-[var(--color-dark-border)]">
+        {/* Filtro de período: presets + inputs — scroll horizontal em mobile */}
+        <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+        <div className="flex items-end gap-3 pt-2 border-t border-slate-100 dark:border-[var(--color-dark-border)] min-w-max sm:min-w-0 sm:flex-wrap">
           <div className="flex items-center gap-1.5 flex-wrap">
             {PRESETS.map(p => (
               <button
@@ -274,7 +275,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
                 min={startDate || ''}
                 max={localDateKey(new Date())}
                 onChange={(e) => { setActivePreset('all'); setExactMappingDate(''); setEndDate(e.target.value); }}
-                className="pl-8 pr-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-[var(--color-dark-border)] bg-slate-50 dark:bg-[var(--color-dark-card)] hover:bg-white dark:hover:bg-[var(--color-dark-border)] focus:bg-white dark:focus:bg-[var(--color-dark-border)] focus:ring-2 focus:ring-blue-500/20 dark:focus:ring-sky-400/20 focus:border-blue-500 dark:focus:border-sky-400 outline-none transition-all text-xs font-bold text-slate-700 dark:text-[var(--color-dark-text)] w-[145px] color-scheme-light dark:[color-scheme:dark]"
+                className="pl-8 pr-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-[var(--color-dark-border)] bg-slate-50 dark:bg-[var(--color-dark-card)] hover:bg-white dark:hover:bg-[var(--color-dark-border)] focus:bg-white dark:focus:bg-[var(--color-dark-border)] focus:ring-2 focus:ring-blue-500/20 dark:focus:ring-sky-400/20 focus:border-blue-500 dark:focus:border-sky-400 outline-none transition-all text-xs font-bold text-slate-700 dark:text-[var(--color-dark-text)] w-[130px] color-scheme-light dark:[color-scheme:dark]"
               />
             </div>
           </label>
@@ -389,6 +390,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
               Limpar
             </button>
           )}
+        </div>
         </div>
       </div>
 
@@ -533,7 +535,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
                   </span>
                   <span className="text-sm font-black text-slate-800 dark:text-[var(--color-dark-text)] font-mono">{totalMapeados}</span>
                 </div>
-                <div className="bg-emerald-50 dark:bg-emerald-400/10 border border-emerald-100 dark:border-emerald-400/20 rounded-xl px-3 py-2 text-center flex-[2] min-w-[220px]">
+                <div className="bg-emerald-50 dark:bg-emerald-400/10 border border-emerald-100 dark:border-emerald-400/20 rounded-xl px-3 py-2 text-center flex-[2] min-w-[160px]">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
@@ -679,7 +681,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
       </div>
 
       {/* ── SEÇÃO 1: PRODUTIVIDADE POR ANALISTA ── */}
-      <div className="bg-white dark:bg-[var(--color-dark-surface)] rounded-3xl border border-slate-100 dark:border-[var(--color-dark-border)] shadow-sm p-6 space-y-4 overflow-hidden transition-colors duration-300">
+      <div className="bg-white dark:bg-[var(--color-dark-surface)] rounded-3xl border border-slate-100 dark:border-[var(--color-dark-border)] shadow-sm p-4 sm:p-6 space-y-4 overflow-hidden transition-colors duration-300">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <button
@@ -864,8 +866,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
       </div>
 
       {/* ── SEÇÃO 2: RESUMO POR MODELO ── */}
-      <div className="bg-white dark:bg-[var(--color-dark-surface)] rounded-3xl border border-slate-100 dark:border-[var(--color-dark-border)] shadow-sm p-6 space-y-4 transition-colors duration-300">
-        <div className="flex items-center justify-between">
+      <div className="bg-white dark:bg-[var(--color-dark-surface)] rounded-3xl border border-slate-100 dark:border-[var(--color-dark-border)] shadow-sm p-4 sm:p-6 space-y-4 transition-colors duration-300">        <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-orange-50 dark:bg-orange-400/10 text-orange-600 dark:text-orange-400 flex items-center justify-center">
               <Boxes className="w-5 h-5" />
