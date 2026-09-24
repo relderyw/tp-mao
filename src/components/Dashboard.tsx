@@ -159,7 +159,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
 
   const META_POR_ANALISTA = 30;
   const PLANO_DIARIO = Math.max(1, data.analistas.length) * META_POR_ANALISTA;
-  const hojeMapeados = data.tpMapDistribution[0]?.quantidade || 0;
+  const hojeMapeados = data.hojeMapeados ?? (data.tpMapDistribution[0]?.quantidade || 0);
   const diferencaHoje = hojeMapeados - PLANO_DIARIO;
 
   if (loading) {
@@ -520,9 +520,9 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
           </div>
 
           {(() => {
-            const totalMapeados = data.tpMapDistribution.reduce((s, b) => s + b.quantidade, 0);
-            const hoje = data.tpMapDistribution[0]?.quantidade || 0;
-            const novos7 = data.tpMapDistribution.slice(0, 7).reduce((s, b) => s + b.quantidade, 0);
+            const totalMapeados = data.stats.concluidos || data.tpMapDistribution.reduce((s, b) => s + b.quantidade, 0);
+            const hoje = data.hojeMapeados ?? (data.tpMapDistribution[0]?.quantidade || 0);
+            const novos7 = data.tpMapDistribution.slice(0, 8).reduce((s, b) => s + b.quantidade, 0);
             const velhos = (data.tpMapDistribution[30]?.quantidade || 0);
             const difHoje = hoje - PLANO_DIARIO;
             return (

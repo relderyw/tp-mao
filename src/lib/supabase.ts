@@ -296,6 +296,7 @@ export interface DashboardData {
   periodTotalItems: number;
   tpMapDistribution: TpMapBucket[];
   mappingDates: { data: string; quantidade: number }[];
+  hojeMapeados: number;
 }
 
 export interface DashboardDateRange {
@@ -578,6 +579,13 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
   const pendentes = Math.max(0, total - concluidos - andamento);
   const todayStr = localDateKey(new Date());
 
+  // Contagem REAL de itens mapeados no dia de hoje (data_map ou updated_at hoje)
+  const hojeMapeados = data.filter(d =>
+    d.status === 'mapeado' &&
+    ((d.data_map && localDateKey(d.data_map) === todayStr) ||
+     (d.updated_at && localDateKey(d.updated_at) === todayStr))
+  ).length;
+
   const inPeriod = (item: any) => {
     if (!hasFilter) return true;
     if (!item.updated_at) return false;
@@ -598,10 +606,11 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
       }
       const st = analistasMap.get(name)!;
       st.total += 1;
+      const itemDate = item.data_map || item.updated_at;
+      if (itemDate && localDateKey(itemDate) === todayStr) {
+        st.hoje += 1;
+      }
       if (item.updated_at) {
-        if (localDateKey(item.updated_at) === todayStr) {
-          st.hoje += 1;
-        }
         st.timestamps.push(new Date(item.updated_at).getTime());
       }
       if (item.tempo_total && item.tempo_total > 0) {
@@ -671,17 +680,17 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
     percent: m.total > 0 ? Number(((m.mapeados / m.total) * 100).toFixed(1)) : 0
   })).sort((a, b) => b.total - a.total);
 
-  // 3. Distribuição Tp Map (dias úteis)
+  // 3. Distribuição Tp Map (dias úteis calculados dinamicamente com base em data_map)
   const MAX_BUCKET = 30;
   const tpCounter = new Map<number, number>();
 
   data.forEach(item => {
     if (item.status !== 'mapeado') return;
     let dias: number;
-    if (typeof item.tp_map === 'number' && isFinite(item.tp_map)) {
-      dias = item.tp_map;
-    } else if (item.data_map) {
+    if (item.data_map) {
       dias = contarDiasUteisLocal(item.data_map);
+    } else if (typeof item.tp_map === 'number' && isFinite(item.tp_map) && item.tp_map > 0) {
+      dias = item.tp_map;
     } else {
       return;
     }
@@ -721,6 +730,7 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
     periodTotalItems,
     tpMapDistribution,
     mappingDates,
+    hojeMapeados,
   };
 }
 
