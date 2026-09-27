@@ -1,22 +1,22 @@
-import { createClient } from '@supabase/supabase-js';
+﻿import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = ((import.meta as any).env?.VITE_SUPABASE_URL || 'https://efeikudymqplfamtexgq.supabase.co') as string;
 const supabaseKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'sb_publishable_IKq4DPh80AlDfYmElLvw4Q_xAUYE6hf') as string;
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
-// ── Helpers de Data (Fuso Local — Manaus UTC-4, etc.) ──────────────
+// â”€â”€ Helpers de Data (Fuso Local â€” Manaus UTC-4, etc.) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Regra GOLD: Banco SEMPRE grava datas em UTC (.toISOString).
 // Quando precisar AGUPAR / COMPARAR por DIA LOCAL (Manaus = UTC-4),
-// SEMPRE converta o timestamp UTC para a data de referência LOCAL antes.
+// SEMPRE converta o timestamp UTC para a data de referÃªncia LOCAL antes.
 
-// Fuso HORÁRIO PADRÃO da aplicação = Manaus (UTC-4).
-// Usamos timezone EXPLÍCITO para não depender das configurações do SO do usuário,
-// que pode estar em "America/Sao_Paulo" (UTC-3) e distorcer todos os horários em 1h.
+// Fuso HORÃRIO PADRÃƒO da aplicaÃ§Ã£o = Manaus (UTC-4).
+// Usamos timezone EXPLÃCITO para nÃ£o depender das configuraÃ§Ãµes do SO do usuÃ¡rio,
+// que pode estar em "America/Sao_Paulo" (UTC-3) e distorcer todos os horÃ¡rios em 1h.
 export const MANAUS_TZ = 'America/Manaus';
 
-/** Converte Data → "YYYY-MM-DD" no FUSO LOCAL DO NAVEGADOR (não UTC).
- *  Ex: 2026-07-29T02:00:00Z (UTC) → 2026-07-28 em Manaus (UTC-4). */
+/** Converte Data â†’ "YYYY-MM-DD" no FUSO LOCAL DO NAVEGADOR (nÃ£o UTC).
+ *  Ex: 2026-07-29T02:00:00Z (UTC) â†’ 2026-07-28 em Manaus (UTC-4). */
 export function localDateKey(dateInput: Date | string): string {
   const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
   if (isNaN(d.getTime())) return '';
@@ -26,33 +26,33 @@ export function localDateKey(dateInput: Date | string): string {
   return `${y}-${m}-${dd}`;
 }
 
-/** Extrai YYYY-MM-DD do início de um timestamp ISO (ignora conversão de fuso). */
+/** Extrai YYYY-MM-DD do inÃ­cio de um timestamp ISO (ignora conversÃ£o de fuso). */
 export function parseIsoCalendarDate(raw: string): { y: number; m: number; d: number } | null {
   const m = String(raw).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return null;
   return { y: +m[1], m: +m[2], d: +m[3] };
 }
 
-/** Registros antigos gravados só como data viram meia-noite UTC no Postgres → 20:00 falso em Manaus. */
+/** Registros antigos gravados sÃ³ como data viram meia-noite UTC no Postgres â†’ 20:00 falso em Manaus. */
 export function isLegacyDateOnlyTimestamp(raw: string, d: Date): boolean {
   const trimmed = String(raw).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return true;
-  // Meia-noite UTC exata = coluna date ou import legado sem horário real.
-  // Cobre "2026-07-28T00:00:00Z" e "2026-07-28 00:00:00+00" (espaço em vez de T).
+  // Meia-noite UTC exata = coluna date ou import legado sem horÃ¡rio real.
+  // Cobre "2026-07-28T00:00:00Z" e "2026-07-28 00:00:00+00" (espaÃ§o em vez de T).
   return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 &&
          d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
 }
 
-/** "YYYY-MM-DD…" → "dd/MM/yyyy" sem deslocar o dia por fuso horário. */
+/** "YYYY-MM-DDâ€¦" â†’ "dd/MM/yyyy" sem deslocar o dia por fuso horÃ¡rio. */
 export function fmtLegacyCalendarDate(raw: string): string {
   const cal = parseIsoCalendarDate(raw);
-  if (!cal) return '—';
+  if (!cal) return 'â€”';
   return `${String(cal.d).padStart(2, '0')}/${String(cal.m).padStart(2, '0')}/${cal.y}`;
 }
 
-/** Converte ISO-UTC (ou Date) → "dd/MM/yyyy" no fuso EXPLÍCITO de Manaus. */
+/** Converte ISO-UTC (ou Date) â†’ "dd/MM/yyyy" no fuso EXPLÃCITO de Manaus. */
 export function fmtManausDate(dateInput: Date | string | null | undefined): string {
-  if (!dateInput) return '—';
+  if (!dateInput) return 'â€”';
   try {
     const raw = String(dateInput);
     const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
@@ -67,22 +67,22 @@ export function fmtManausDate(dateInput: Date | string | null | undefined): stri
   } catch { return String(dateInput); }
 }
 
-/** Converte ISO-UTC (ou Date) → "dd/MM/yyyy HH:mm" no fuso EXPLÍCITO de Manaus.
- *  Detecta automaticamente: se o valor original é SÓ DATA ("YYYY-MM-DD" sem horário),
- *  retorna a data SEM adicionar horário falso (ex: não inventa "20:00"). */
+/** Converte ISO-UTC (ou Date) â†’ "dd/MM/yyyy HH:mm" no fuso EXPLÃCITO de Manaus.
+ *  Detecta automaticamente: se o valor original Ã© SÃ“ DATA ("YYYY-MM-DD" sem horÃ¡rio),
+ *  retorna a data SEM adicionar horÃ¡rio falso (ex: nÃ£o inventa "20:00"). */
 export function fmtManausDateTime(dateInput: Date | string | null | undefined): string {
-  if (!dateInput) return '—';
+  if (!dateInput) return 'â€”';
   try {
     const raw = String(dateInput);
     const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
     if (isNaN(d.getTime())) return raw;
 
-    // Caso 1: valor SÓ DATA legado → exibimos apenas a data, sem horário inventado (20:00).
+    // Caso 1: valor SÃ“ DATA legado â†’ exibimos apenas a data, sem horÃ¡rio inventado (20:00).
     if (isLegacyDateOnlyTimestamp(raw, d)) {
       return fmtLegacyCalendarDate(raw);
     }
 
-    // Caso 2: ISO com horário UTC — formatamos data+horário em Manaus (UTC-4).
+    // Caso 2: ISO com horÃ¡rio UTC â€” formatamos data+horÃ¡rio em Manaus (UTC-4).
     const partes = new Intl.DateTimeFormat('pt-BR', {
       timeZone: MANAUS_TZ,
       day: '2-digit',
@@ -98,8 +98,8 @@ export function fmtManausDateTime(dateInput: Date | string | null | undefined): 
   } catch { return String(dateInput); }
 }
 
-/** Converte ISO-UTC (ou Date) → "HH:mm" no fuso EXPLÍCITO de Manaus.
- *  Se o valor for "só data" retorna vazio, não inventa 20:00. */
+/** Converte ISO-UTC (ou Date) â†’ "HH:mm" no fuso EXPLÃCITO de Manaus.
+ *  Se o valor for "sÃ³ data" retorna vazio, nÃ£o inventa 20:00. */
 export function fmtManausTime(dateInput: Date | string | null | undefined): string {
   if (!dateInput) return '';
   try {
@@ -119,7 +119,7 @@ export function fmtManausTime(dateInput: Date | string | null | undefined): stri
   } catch { return ''; }
 }
 
-/** Data de mapeamento para exibição — trata registros legados e timestamps reais. */
+/** Data de mapeamento para exibiÃ§Ã£o â€” trata registros legados e timestamps reais. */
 export function fmtMappingDate(
   dataMap?: string | null,
   _updatedAt?: string | null
@@ -127,7 +127,7 @@ export function fmtMappingDate(
   return fmtManausDate(dataMap);
 }
 
-/** Hora de mapeamento — usa updated_at quando data_map é legado sem horário real. */
+/** Hora de mapeamento â€” usa updated_at quando data_map Ã© legado sem horÃ¡rio real. */
 export function fmtMappingTime(
   dataMap?: string | null,
   updatedAt?: string | null
@@ -144,35 +144,35 @@ export function fmtMappingTime(
   } catch { return ''; }
 }
 
-/** Data+hora de mapeamento para exibição/CSV. */
+/** Data+hora de mapeamento para exibiÃ§Ã£o/CSV. */
 export function fmtMappingDateTime(
   dataMap?: string | null,
   updatedAt?: string | null
 ): string {
   const date = fmtMappingDate(dataMap, updatedAt);
   const time = fmtMappingTime(dataMap, updatedAt);
-  if (date === '—') return '—';
+  if (date === 'â€”') return 'â€”';
   return time ? `${date} ${time}` : date;
 }
 
-/** Data "YYYY-MM-DD" no fuso LOCAL → ISO UTC do 1° segundo daquele dia.
- *  Ex: "2026-07-28" em Manaus → 2026-07-28T04:00:00.000Z */
+/** Data "YYYY-MM-DD" no fuso LOCAL â†’ ISO UTC do 1Â° segundo daquele dia.
+ *  Ex: "2026-07-28" em Manaus â†’ 2026-07-28T04:00:00.000Z */
 export function localStartOfDayToUtcIso(localDateStr: string): string {
   if (!localDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(localDateStr)) return '';
   const [y, m, d] = localDateStr.split('-').map(Number);
   return new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();
 }
 
-/** Data "YYYY-MM-DD" no fuso LOCAL → ISO UTC do último ms daquele dia.
- *  Ex: "2026-07-28" em Manaus → 2026-07-29T03:59:59.999Z */
+/** Data "YYYY-MM-DD" no fuso LOCAL â†’ ISO UTC do Ãºltimo ms daquele dia.
+ *  Ex: "2026-07-28" em Manaus â†’ 2026-07-29T03:59:59.999Z */
 export function localEndOfDayToUtcIso(localDateStr: string): string {
   if (!localDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(localDateStr)) return '';
   const [y, m, d] = localDateStr.split('-').map(Number);
   return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
 }
 
-/** "YYYY-MM-DD HH:MM:SS" em data LOCAL → ISO UTC equivalente.
- *  Usado para converter valores de input do usuário em UTC p/ filtros de query. */
+/** "YYYY-MM-DD HH:MM:SS" em data LOCAL â†’ ISO UTC equivalente.
+ *  Usado para converter valores de input do usuÃ¡rio em UTC p/ filtros de query. */
 export function localDateTimeToUtcIso(dateStr: string, timeStr = '00:00:00'): string {
   const [y, m, d] = (dateStr || '').split('-').map(Number);
   const [h, mi, s] = (timeStr || '00:00:00').split(':').map(n => parseInt(n, 10) || 0);
@@ -180,7 +180,7 @@ export function localDateTimeToUtcIso(dateStr: string, timeStr = '00:00:00'): st
   return new Date(y, m - 1, d, h, mi, s, 0).toISOString();
 }
 
-// ── Tipos ──────────────────────────────────────────────────────────
+// â”€â”€ Tipos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface SaldoEstoque {
   id?: number;
   sku: string;
@@ -239,15 +239,15 @@ export interface SkuTp {
   // Sub-processo 6: POSICIONAR IK
   pos_t1?: number | null; pos_t2?: number | null; pos_t3?: number | null; pos_t4?: number | null; pos_t5?: number | null;
   pos_qtd?: number | null; pos_res?: number | null;
-  // Informações adicionais do item
+  // InformaÃ§Ãµes adicionais do item
   pecas_kd?: number | null;
   tp_emb_forn?: string | null;
   pd_emb_forn?: string | null;
   tp_emb_dcc?: string | null;
   pd_emb_dcc?: string | null;
   carro?: string | null;
-  // Dias úteis (seg-sex) desde o mapeamento: calculado no DB via trigger.
-  // Item mapeado HOJE = 0. Amanhã dia útil = 1. Sábado/domingo não contam.
+  // Dias Ãºteis (seg-sex) desde o mapeamento: calculado no DB via trigger.
+  // Item mapeado HOJE = 0. AmanhÃ£ dia Ãºtil = 1. SÃ¡bado/domingo nÃ£o contam.
   tp_map?: number | null;
   // Resultado
   tempo_total?: number | null;
@@ -289,9 +289,9 @@ export interface AnalystStat {
   nome: string;
   hoje: number;
   total: number;
-  mediaTempo: number;          // Tempo médio do processo (s) por item
-  tempoMedioCicloMin: number;  // Intervalo médio entre conclusões (min/item: A -> B -> C...)
-  capacidadeEstimadaDia: number; // Projeção de itens/dia
+  mediaTempo: number;          // Tempo mÃ©dio do processo (s) por item
+  tempoMedioCicloMin: number;  // Intervalo mÃ©dio entre conclusÃµes (min/item: A -> B -> C...)
+  capacidadeEstimadaDia: number; // ProjeÃ§Ã£o de itens/dia
 }
 
 export interface ModelStat {
@@ -303,13 +303,13 @@ export interface ModelStat {
   percent: number;
 }
 
-/** Dado de 1 barra do gráfico de distribuição "Dias desde o Mapeamento" (tp_map). */
+/** Dado de 1 barra do grÃ¡fico de distribuiÃ§Ã£o "Dias desde o Mapeamento" (tp_map). */
 export interface TpMapBucket {
-  /** Dias úteis desde o mapeamento (0 = hoje, 1 = 1 dia útil atrás, ...) */
+  /** Dias Ãºteis desde o mapeamento (0 = hoje, 1 = 1 dia Ãºtil atrÃ¡s, ...) */
   dias: number;
   /** Quantidade de itens nessa "faixa" de dias */
   quantidade: number;
-  /** Rótulo amigável: "Hoje" | "1 dia útil" | "2 dias úteis" | "30+ dias úteis" etc. */
+  /** RÃ³tulo amigÃ¡vel: "Hoje" | "1 dia Ãºtil" | "2 dias Ãºteis" | "30+ dias Ãºteis" etc. */
   label: string;
 }
 
@@ -317,23 +317,24 @@ export interface DashboardData {
   stats: StatsTp;
   analistas: AnalystStat[];
   modelos: ModelStat[];
-  /** Rótulo do período selecionado pelo usuário (null = sem filtro) */
+  /** RÃ³tulo do perÃ­odo selecionado pelo usuÃ¡rio (null = sem filtro) */
   periodLabel: string | null;
-  /** Número de itens mapeados/em andamento DENTRO do período (exclui filtro) */
+  /** NÃºmero de itens mapeados/em andamento DENTRO do perÃ­odo (exclui filtro) */
   periodTotalItems: number;
-  /** ⬇️ NOVOS CAMPOS */
-  /** Distribuição de itens concluídos por dias úteis (gráfico de barras do tp_map) */
+  /** â¬‡ï¸ NOVOS CAMPOS */
+  /** DistribuiÃ§Ã£o de itens concluÃ­dos por dias Ãºteis (grÃ¡fico de barras do tp_map) */
   tpMapDistribution: TpMapBucket[];
   /** Lista de DATAS EXATAS de mapeamento (YYYY-MM-DD, fuso local)
    *  com contagem de itens naquele dia. Usado para o FILTRO de dia exato. */
   mappingDates: { data: string; quantidade: number }[];
+  hojeMapeados: number;
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// CACHE EM MEMÓRIA (TTL) — Reduz 70%+ das requisições repetidas
-// ═══════════════════════════════════════════════════════════════════
-// NÃO afeta writes: todo save chama invalidateCachesAferWrite()
-// Todas as consultas usam o valor do cache enquanto for válido.
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// CACHE EM MEMÃ“RIA (TTL) â€” Reduz 70%+ das requisiÃ§Ãµes repetidas
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// NÃƒO afeta writes: todo save chama invalidateCachesAferWrite()
+// Todas as consultas usam o valor do cache enquanto for vÃ¡lido.
 type CacheEntry<T> = { data: T; expiry: number };
 
 const CACHE = {
@@ -341,27 +342,27 @@ const CACHE = {
   resumoLoc: new Map<string, CacheEntry<LocacaoResumo[]>>(), // key = filtro
   uniqueModels: null as CacheEntry<string[]> | null,
   uniqueAnalysts: null as CacheEntry<string[]> | null,
-  // Flag: já tentamos usar a view SQL nesta sessão? (evita retry de erro a cada chamada)
+  // Flag: jÃ¡ tentamos usar a view SQL nesta sessÃ£o? (evita retry de erro a cada chamada)
   viewStatsAvailable: null as boolean | null,
   viewResumoLocAvailable: null as boolean | null,
 };
 
-// TTLs conservadores — leitura não crítica para atualização instantânea
+// TTLs conservadores â€” leitura nÃ£o crÃ­tica para atualizaÃ§Ã£o instantÃ¢nea
 const TTL = {
-  STATS_MS: 30_000,          // 30s  → KPIs do painel
-  RESUMO_LOC_MS: 20_000,     // 20s  → Resumo por locação (muito pesado)
-  UNIQUE_MODEL_MS: 120_000,  // 2min → Lista de modelos únicos (nunca muda!)
-  UNIQUE_ANALYS_MS: 60_000,   // 1min → Lista de analistas únicos
+  STATS_MS: 30_000,          // 30s  â†’ KPIs do painel
+  RESUMO_LOC_MS: 20_000,     // 20s  â†’ Resumo por locaÃ§Ã£o (muito pesado)
+  UNIQUE_MODEL_MS: 120_000,  // 2min â†’ Lista de modelos Ãºnicos (nunca muda!)
+  UNIQUE_ANALYS_MS: 60_000,   // 1min â†’ Lista de analistas Ãºnicos
 };
 
-/** Invalidar TODOS os caches — chamar APENAS após um save bem-sucedido. */
+/** Invalidar TODOS os caches â€” chamar APENAS apÃ³s um save bem-sucedido. */
 export function invalidateCachesAfterWrite(): void {
   CACHE.stats = null;
   CACHE.resumoLoc.clear();
-  // uniqueModels / uniqueAnalysts não precisam ser invalidados em saves
+  // uniqueModels / uniqueAnalysts nÃ£o precisam ser invalidados em saves
 }
 
-/** Helper: retorna valor do cache se ainda for válido */
+/** Helper: retorna valor do cache se ainda for vÃ¡lido */
 function cacheGet<T>(entry: CacheEntry<T> | null): T | null {
   if (!entry) return null;
   if (Date.now() > entry.expiry) return null;
@@ -372,9 +373,9 @@ function cacheSet<T>(entryRef: { current?: any } | null, key: 'stats' | 'uniqueM
   return value;
 }
 
-// ── Funções de acesso ──────────────────────────────────────────────
+// â”€â”€ FunÃ§Ãµes de acesso â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/** Busca todos os itens de um KD pela CHAVE do QR Code (normaliza espaços) */
+/** Busca todos os itens de um KD pela CHAVE do QR Code (normaliza espaÃ§os) */
 export async function getItensByChave(rawChave: string): Promise<(SaldoEstoque & { tp: SkuTp | null })[]> {
   const chave = rawChave.replace(/\s+/g, '').toUpperCase().trim();
 
@@ -400,7 +401,7 @@ export async function getItensByChave(rawChave: string): Promise<(SaldoEstoque &
   }));
 }
 
-/** Busca resumo por locação (saldo_estoque x sku_tp pendentes de mapeamento)
+/** Busca resumo por locaÃ§Ã£o (saldo_estoque x sku_tp pendentes de mapeamento)
  *  COM CACHE: evita baixar TABELA INTEIRA repetidamente em cada montagem de tela / polling. */
 export async function getResumoLocacoes(filterLocacao?: string): Promise<LocacaoResumo[]> {
   const cacheKey = (filterLocacao || '').trim().toLowerCase() || '__ALL__';
@@ -459,7 +460,7 @@ export async function getResumoLocacoes(filterLocacao?: string): Promise<Locacao
   const locMap = new Map<string, LocacaoResumo>();
 
   allSaldo.forEach(item => {
-    const loc = (item.locacao || 'SEM LOCAÇÃO').trim().toUpperCase();
+    const loc = (item.locacao || 'SEM LOCAÃ‡ÃƒO').trim().toUpperCase();
     if (!locMap.has(loc)) {
       locMap.set(loc, {
         locacao: loc,
@@ -499,15 +500,15 @@ export async function getResumoLocacoes(filterLocacao?: string): Promise<Locacao
   return result;
 }
 
-/** Busca estatísticas globais de progresso
- *  1) Primeiro: retorna cache em memória (se válido) → 0 requisições!
- *  2) Depois: TENTA SQL VIEW `stats_tp_view` (criada via migration) → 1 LINHA, ~8.600x mais leve.
- *  3) Fallback: método antigo (baixa tabela inteira) se a View ainda não existir. */
+/** Busca estatÃ­sticas globais de progresso
+ *  1) Primeiro: retorna cache em memÃ³ria (se vÃ¡lido) â†’ 0 requisiÃ§Ãµes!
+ *  2) Depois: TENTA SQL VIEW `stats_tp_view` (criada via migration) â†’ 1 LINHA, ~8.600x mais leve.
+ *  3) Fallback: mÃ©todo antigo (baixa tabela inteira) se a View ainda nÃ£o existir. */
 export async function getStatsTp(): Promise<StatsTp> {
   const cached = cacheGet<StatsTp>(CACHE.stats);
   if (cached) return cached;
 
-  // 2ª tentativa: SQL VIEW (se disponível)
+  // 2Âª tentativa: SQL VIEW (se disponÃ­vel)
   if (CACHE.viewStatsAvailable !== false) {
     try {
       const { data, error } = await supabase
@@ -523,11 +524,11 @@ export async function getStatsTp(): Promise<StatsTp> {
           andamento: Number(data.andamento) || 0,
           pendentes: Number(data.pendentes) || (Number(data.total) || 8643),
         };
-        // Garante coerência: total = soma dos 3 status
+        // Garante coerÃªncia: total = soma dos 3 status
         result.pendentes = Math.max(0, result.total - result.concluidos - result.andamento);
         return cacheSet<StatsTp>(null, 'stats', result, TTL.STATS_MS);
       }
-      // View não existe → marca para não tentar de novo nesta sessão
+      // View nÃ£o existe â†’ marca para nÃ£o tentar de novo nesta sessÃ£o
       if (error && /relation.*does not exist|does not exist/i.test(String(error.message || error))) {
         CACHE.viewStatsAvailable = false;
       }
@@ -536,7 +537,7 @@ export async function getStatsTp(): Promise<StatsTp> {
     }
   }
 
-  // 3ª tentativa: Fallback = método original (baixa tabela inteira)
+  // 3Âª tentativa: Fallback = mÃ©todo original (baixa tabela inteira)
   const { data, count, error } = await supabase
     .from('sku_tp')
     .select('status', { count: 'exact' });
@@ -555,39 +556,39 @@ export async function getStatsTp(): Promise<StatsTp> {
   return cacheSet<StatsTp>(null, 'stats', result, TTL.STATS_MS);
 }
 
-/** Busca analítica completa para o Dashboard (Produtividade por analista e Resumo por modelo) */
+/** Busca analÃ­tica completa para o Dashboard (Produtividade por analista e Resumo por modelo) */
 export interface DashboardDateRange {
-  /** 'YYYY-MM-DD' no fuso LOCAL (Manaus). Se vazio, não limita início. */
+  /** 'YYYY-MM-DD' no fuso LOCAL (Manaus). Se vazio, nÃ£o limita inÃ­cio. */
   startDate?: string;
-  /** 'YYYY-MM-DD' no fuso LOCAL (Manaus). Se vazio, não limita fim. */
+  /** 'YYYY-MM-DD' no fuso LOCAL (Manaus). Se vazio, nÃ£o limita fim. */
   endDate?: string;
 }
 
 export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Promise<DashboardData> {
-  // Converte datas do filtro (fuso LOCAL) → limites de timestamp em UTC
-  // que usaremos p/ decidir se um item entra na contagem de produtividade do período.
+  // Converte datas do filtro (fuso LOCAL) â†’ limites de timestamp em UTC
+  // que usaremos p/ decidir se um item entra na contagem de produtividade do perÃ­odo.
   const gteTs = dateRange?.startDate ? new Date(localStartOfDayToUtcIso(dateRange.startDate)).getTime() : -Infinity;
   const lteTs = dateRange?.endDate   ? new Date(localEndOfDayToUtcIso(dateRange.endDate)).getTime()   :  Infinity;
   const hasFilter = (dateRange?.startDate != null && dateRange.startDate !== '') ||
                     (dateRange?.endDate   != null && dateRange.endDate   !== '');
 
-  // Rótulo que vai no card do analista no lugar de "Hoje" quando filtro ativo
+  // RÃ³tulo que vai no card do analista no lugar de "Hoje" quando filtro ativo
   const periodLabel = (() => {
     if (!hasFilter) return null;
     const s = dateRange?.startDate;
     const e = dateRange?.endDate;
     if (s && e && s === e) return 'No Dia';
-    return 'No Período';
+    return 'No PerÃ­odo';
   })();
 
-  // Supabase PostgREST limita a 1.000 linhas por requisição por padrão.
-  // Fazemos paginação em lote de 1.000 para carregar TODOS os 18.000+ SKUs!
+  // Supabase PostgREST limita a 1.000 linhas por requisiÃ§Ã£o por padrÃ£o.
+  // Fazemos paginaÃ§Ã£o em lote de 1.000 para carregar TODOS os 18.000+ SKUs!
   let allData: any[] = [];
   let page = 0;
   const pageSize = 1000;
   let hasMore = true;
 
-  while (hasMore && page < 50) { // limite de segurança 50k linhas
+  while (hasMore && page < 50) { // limite de seguranÃ§a 50k linhas
     const { data: pageData, error } = await supabase
       .from('sku_tp')
       .select('id, sku, modelo, responsavel, status, tempo_total, updated_at, data_map, tp_map')
@@ -619,22 +620,28 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
     };
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // KPI Cards do topo (TOTAL GERAL DA ESTRUTURA — ignoram filtro
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // KPI Cards do topo (TOTAL GERAL DA ESTRUTURA â€” ignoram filtro
   // de data, pois representam o "estado atual do trabalho")
-  // ═══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   const total = data.length;
   const concluidos = data.filter(d => d.status === 'mapeado').length;
   const andamento = data.filter(d => d.status === 'andamento').length;
   const pendentes = total - concluidos - andamento;
 
-  // Usa DATA LOCAL DO NAVEGADOR (não UTC) para bater com fusos como Manaus (UTC-4)
-  // ex: 22:00 do dia 27 local = 02:00 dia 28 UTC — queremos "hoje" = dia 27
+  // Usa DATA LOCAL DO NAVEGADOR (nÃ£o UTC) para bater com fusos como Manaus (UTC-4)
+  // ex: 22:00 do dia 27 local = 02:00 dia 28 UTC â€” queremos "hoje" = dia 27
   const todayStr = localDateKey(new Date());
 
-  // Predicado: UM ITEM CONTA NA PRODUTIVIDADE DO PERÍODO?
-  // Sem filtro → sempre true (todo o histórico).
-  // Com filtro → requer updated_at (tempo em ms) DENTRO de [gteTs, lteTs].
+  // Contagem REAL de itens mapeados no dia de hoje usando data_map (nao updated_at que muda na migracao)
+  const hojeMapeados = data.filter(d =>
+    d.status === 'mapeado' &&
+    d.data_map && localDateKey(d.data_map) === todayStr
+  ).length;
+
+  // Predicado: UM ITEM CONTA NA PRODUTIVIDADE DO PERÃODO?
+  // Sem filtro â†’ sempre true (todo o histÃ³rico).
+  // Com filtro â†’ requer updated_at (tempo em ms) DENTRO de [gteTs, lteTs].
   const inPeriod = (item: any) => {
     if (!hasFilter) return true;
     if (!item.updated_at) return false;
@@ -656,9 +663,9 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
       const st = analistasMap.get(name)!;
       st.total += 1;
       if (item.updated_at) {
-        // ATENÇÃO: updated_at no banco está em UTC. Para comparar "hoje" com
-        // dia local Manaus, converte o timestamp UTC → chave de data local antes.
-        if (localDateKey(item.updated_at) === todayStr) {
+      // Usa data_map (data real do mapeamento) para 'hoje', nao updated_at
+      const _itemDate = item.data_map ? localDateKey(item.data_map) : '';
+      if (_itemDate === todayStr) {
           st.hoje += 1;
         }
         st.timestamps.push(new Date(item.updated_at).getTime());
@@ -670,12 +677,12 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
   });
 
   const analistas: AnalystStat[] = Array.from(analistasMap.entries()).map(([nome, st]) => {
-    // Média de tempo cronometrado da peça (segundos)
+    // MÃ©dia de tempo cronometrado da peÃ§a (segundos)
     const avgTempoProcesso = st.tempos.length > 0
       ? Number((st.tempos.reduce((a, b) => a + b, 0) / st.tempos.length).toFixed(2))
       : 0;
 
-    // Cálculo do tempo entre o item A -> B -> C... (minutos de intervalo entre registros)
+    // CÃ¡lculo do tempo entre o item A -> B -> C... (minutos de intervalo entre registros)
     let tempoMedioCicloMin = 0;
     if (st.timestamps.length > 1) {
       const sortedTs = [...st.timestamps].sort((a, b) => a - b);
@@ -683,7 +690,7 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
       for (let i = 1; i < sortedTs.length; i++) {
         const diffMs = sortedTs[i] - sortedTs[i - 1];
         const diffMin = diffMs / (1000 * 60);
-        // Desconsidera intervalos maiores que 45 min (pausas de almoço/turnos)
+        // Desconsidera intervalos maiores que 45 min (pausas de almoÃ§o/turnos)
         if (diffMin > 0.05 && diffMin <= 45) {
           intervalsMin.push(diffMin);
         }
@@ -693,12 +700,12 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
       }
     }
 
-    // Se não houver histórico de datas suficiente, estima pelo tempo cronometrado + 1,5 min de manuseio/troca
+    // Se nÃ£o houver histÃ³rico de datas suficiente, estima pelo tempo cronometrado + 1,5 min de manuseio/troca
     if (tempoMedioCicloMin === 0) {
       tempoMedioCicloMin = Number(((avgTempoProcesso / 60) + 1.5).toFixed(1));
     }
 
-    // Projeção diária por analista (Jornada útil de 7h = 420 min / ritmo por item)
+    // ProjeÃ§Ã£o diÃ¡ria por analista (Jornada Ãºtil de 7h = 420 min / ritmo por item)
     const capacidadeEstimadaDia = tempoMedioCicloMin > 0 ? Math.round(420 / tempoMedioCicloMin) : 0;
 
     return {
@@ -712,8 +719,8 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
   }).sort((a, b) => b.total - a.total);
 
   // 2. Agrupamento por Modelo (modelo)
-  // Com filtro de data: considera SOMENTE os itens do PERÍODO filtrado
-  // (mostra modelos "ativos" em produtividade durante o período)
+  // Com filtro de data: considera SOMENTE os itens do PERÃODO filtrado
+  // (mostra modelos "ativos" em produtividade durante o perÃ­odo)
   // Sem filtro: mostra TUDO (100% da estrutura atual)
   const modelosMap = new Map<string, { total: number; mapeados: number; andamento: number; pendentes: number }>();
 
@@ -739,15 +746,15 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
     percent: m.total > 0 ? Number(((m.mapeados / m.total) * 100).toFixed(1)) : 0
   })).sort((a, b) => b.total - a.total);
 
-  // 3. ═══════════════════════════════════════════════════════════
-  // GRÁFICO DE DISTRIBUIÇÃO: "Dias úteis desde o Mapeamento" (tp_map)
-  // Agrupa itens CONCLUÍDOS por buckets de dias úteis.
-  //    Bucket 0 → Hoje
-  //    Bucket 1 → 1 dia útil atrás
-  //    Bucket 2 → 2 dias úteis atrás
+  // 3. â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // GRÃFICO DE DISTRIBUIÃ‡ÃƒO: "Dias Ãºteis desde o Mapeamento" (tp_map)
+  // Agrupa itens CONCLUÃDOS por buckets de dias Ãºteis.
+  //    Bucket 0 â†’ Hoje
+  //    Bucket 1 â†’ 1 dia Ãºtil atrÃ¡s
+  //    Bucket 2 â†’ 2 dias Ãºteis atrÃ¡s
   //    ...
-  //    Bucket 30+ → Tudo o que tem 30+ dias úteis (acumula para o gráfico não ficar gigante)
-  // ═══════════════════════════════════════════════════════════════
+  //    Bucket 30+ â†’ Tudo o que tem 30+ dias Ãºteis (acumula para o grÃ¡fico nÃ£o ficar gigante)
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   const MAX_BUCKET = 30;
   const tpCounter = new Map<number, number>();
 
@@ -768,7 +775,7 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
   data.forEach(item => {
     if (item.status !== 'mapeado') return;
     // Usa tp_map do banco (calculado pelo trigger) se existir.
-    // Caso contrário, fallback: calcula no frontend (mesma regra de dias úteis).
+    // Caso contrÃ¡rio, fallback: calcula no frontend (mesma regra de dias Ãºteis).
     let dias: number;
     if (typeof item.tp_map === 'number' && isFinite(item.tp_map)) {
       dias = item.tp_map;
@@ -776,28 +783,28 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
       try { dias = contarDiasUteisLocal(item.data_map); }
       catch { dias = 0; }
     } else {
-      return; // sem data de mapeamento, não entra no gráfico
+      return; // sem data de mapeamento, nÃ£o entra no grÃ¡fico
     }
     const bucket = dias >= MAX_BUCKET ? MAX_BUCKET : dias;
     tpCounter.set(bucket, (tpCounter.get(bucket) || 0) + 1);
   });
 
-  // Constrói o array final do gráfico com todos os buckets de 0..MAX_BUCKET
-  // (mesmo os que têm 0, para o eixo X ficar completo)
+  // ConstrÃ³i o array final do grÃ¡fico com todos os buckets de 0..MAX_BUCKET
+  // (mesmo os que tÃªm 0, para o eixo X ficar completo)
   const tpMapDistribution: TpMapBucket[] = [];
   for (let d = 0; d <= MAX_BUCKET; d++) {
     const qty = tpCounter.get(d) || 0;
     let label: string;
     if (d === 0) label = 'Hoje';
-    else if (d === MAX_BUCKET) label = `${MAX_BUCKET}+ dias úteis`;
-    else label = d === 1 ? `${d} dia útil` : `${d} dias úteis`;
+    else if (d === MAX_BUCKET) label = `${MAX_BUCKET}+ dias Ãºteis`;
+    else label = d === 1 ? `${d} dia Ãºtil` : `${d} dias Ãºteis`;
     tpMapDistribution.push({ dias: d, quantidade: qty, label });
   }
 
-  // 4. ═══════════════════════════════════════════════════════════
-  // FILTRO DE DIA EXATO: lista de datas únicas de mapeamento
+  // 4. â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // FILTRO DE DIA EXATO: lista de datas Ãºnicas de mapeamento
   // (data_map no fuso LOCAL = chave YYYY-MM-DD do navegador)
-  // ═══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   const datesCounter = new Map<string, number>();
   data.forEach(item => {
     if (item.status !== 'mapeado' || !item.data_map) return;
@@ -818,10 +825,11 @@ export async function getDashboardAnalytics(dateRange?: DashboardDateRange): Pro
     periodTotalItems,
     tpMapDistribution,
     mappingDates,
+    hojeMapeados,
   };
 }
 
-/** Busca lista de SKUs com suporte a filtro e busca por código/descrição */
+/** Busca lista de SKUs com suporte a filtro e busca por cÃ³digo/descriÃ§Ã£o */
 export async function getSkusList(search: string = '', limit: number = 50): Promise<SkuTp[]> {
   let query = supabase
     .from('sku_tp')
@@ -853,7 +861,7 @@ export interface SkusReportFilters {
   pageSize?: number;
 }
 
-/** Busca itens para o Relatório com filtros avançados + paginação */
+/** Busca itens para o RelatÃ³rio com filtros avanÃ§ados + paginaÃ§Ã£o */
 export async function getSkusReport(
   filters: SkusReportFilters = {}
 ): Promise<{ data: SkuTp[]; total: number }> {
@@ -871,11 +879,11 @@ export async function getSkusReport(
   if (modelo?.trim()) query = query.ilike('modelo', `%${modelo.trim()}%`);
   if (status?.trim()) query = query.eq('status', status.trim());
   if (responsavel?.trim()) query = query.ilike('responsavel', `%${responsavel.trim()}%`);
-  // IMPORTANTE: dataInicio e dataFim chegam como "YYYY-MM-DD" no fuso LOCAL do usuário.
-  // No banco, data_map está armazenado como ISO UTC via new Date().toISOString().
+  // IMPORTANTE: dataInicio e dataFim chegam como "YYYY-MM-DD" no fuso LOCAL do usuÃ¡rio.
+  // No banco, data_map estÃ¡ armazenado como ISO UTC via new Date().toISOString().
   // Precisamos converter:
-  //   dataInicio = "2026-07-28" Manaus → UTC = 2026-07-28T04:00:00.000Z  (gte)
-  //   dataFim    = "2026-07-28" Manaus → UTC = 2026-07-29T03:59:59.999Z  (lte)
+  //   dataInicio = "2026-07-28" Manaus â†’ UTC = 2026-07-28T04:00:00.000Z  (gte)
+  //   dataFim    = "2026-07-28" Manaus â†’ UTC = 2026-07-29T03:59:59.999Z  (lte)
   const gte = localStartOfDayToUtcIso(dataInicio || '');
   const lte = localEndOfDayToUtcIso(dataFim || '');
   if (gte) query = query.gte('data_map', gte);
@@ -885,14 +893,14 @@ export async function getSkusReport(
 
   const { data, count, error } = await query;
   if (error) {
-    console.error('Erro ao buscar relatório de SKUs:', error);
+    console.error('Erro ao buscar relatÃ³rio de SKUs:', error);
     return { data: [], total: 0 };
   }
   return { data: data || [], total: count || 0 };
 }
 
-/** Busca lista de modelos únicos para o filtro (paginado para pegar todos os 8.600+ SKUs)
- *  COM CACHE: Modelos NUNCA mudam em tempo real — 2min de TTL elimina dezenas de requisições. */
+/** Busca lista de modelos Ãºnicos para o filtro (paginado para pegar todos os 8.600+ SKUs)
+ *  COM CACHE: Modelos NUNCA mudam em tempo real â€” 2min de TTL elimina dezenas de requisiÃ§Ãµes. */
 export async function getUniqueModels(): Promise<string[]> {
   const cached = cacheGet<string[]>(CACHE.uniqueModels);
   if (cached) return cached;
@@ -921,7 +929,7 @@ export async function getUniqueModels(): Promise<string[]> {
   return cacheSet<string[]>(null, 'uniqueModels', result, TTL.UNIQUE_MODEL_MS);
 }
 
-/** Busca lista de analistas únicos para o filtro (paginado para pegar todos os 8.600+ SKUs)
+/** Busca lista de analistas Ãºnicos para o filtro (paginado para pegar todos os 8.600+ SKUs)
  *  COM CACHE: 1min de TTL (evita consulta repetida a cada abertura do filtro). */
 export async function getUniqueAnalysts(): Promise<string[]> {
   const cached = cacheGet<string[]>(CACHE.uniqueAnalysts);
@@ -952,10 +960,10 @@ export async function getUniqueAnalysts(): Promise<string[]> {
 }
 
 
-/** Salva as tomadas de um sub-processo específico de um SKU no Supabase.
- *  PROTEÇÃO CONCORRÊNCIA: Sempre lê a versão MAIS RECENTE do banco imediatamente antes
- *  de escrever (evita sobrepor gravações de outros analistas feitas enquanto este cliente
- *  estava com dados em cache). Usa operações de MERGE campo-a-campo.
+/** Salva as tomadas de um sub-processo especÃ­fico de um SKU no Supabase.
+ *  PROTEÃ‡ÃƒO CONCORRÃŠNCIA: Sempre lÃª a versÃ£o MAIS RECENTE do banco imediatamente antes
+ *  de escrever (evita sobrepor gravaÃ§Ãµes de outros analistas feitas enquanto este cliente
+ *  estava com dados em cache). Usa operaÃ§Ãµes de MERGE campo-a-campo.
  */
 export async function saveSubProcessMeasurements(
   sku: string,
@@ -981,8 +989,8 @@ export async function saveSubProcessMeasurements(
 
       const currentTp: any = current || { sku, status: 'pendente' };
 
-      // 2) MERGE CAMPO-A-CAMPO: só atualiza campos em updateFields que tem VALOR EXPLÍCITO (null também vale = apagar tomada).
-      // Campos não mencionados em updateFields → mantém valor do banco (evita sobrepor writes concorrentes).
+      // 2) MERGE CAMPO-A-CAMPO: sÃ³ atualiza campos em updateFields que tem VALOR EXPLÃCITO (null tambÃ©m vale = apagar tomada).
+      // Campos nÃ£o mencionados em updateFields â†’ mantÃ©m valor do banco (evita sobrepor writes concorrentes).
       const merged: any = { ...currentTp };
       for (const k of Object.keys(updateFields)) {
         merged[k] = (updateFields as any)[k];
@@ -1026,7 +1034,7 @@ export async function saveSubProcessMeasurements(
 
       if (error) throw error;
 
-      // ↓ SUCESSO! Invalida caches de leitura para KPIs / resumos refletirem o save
+      // â†“ SUCESSO! Invalida caches de leitura para KPIs / resumos refletirem o save
       invalidateCachesAfterWrite();
       return updated as SkuTp;
     } catch (err: any) {
@@ -1038,12 +1046,12 @@ export async function saveSubProcessMeasurements(
     }
   }
 
-  console.error(`[saveSubProcessMeasurements] Falhou após ${maxRetries} tentativas para SKU ${sku}:`, lastErr);
+  console.error(`[saveSubProcessMeasurements] Falhou apÃ³s ${maxRetries} tentativas para SKU ${sku}:`, lastErr);
   return null;
 }
 
 /** Grava UMA tomada calculando o SLOT VAZIO usando DADOS FRESCOS DO BANCO.
- *  Essa é a função SEGURA para múltiplos analistas — evita sobrescrever tomadas simultâneas.
+ *  Essa Ã© a funÃ§Ã£o SEGURA para mÃºltiplos analistas â€” evita sobrescrever tomadas simultÃ¢neas.
  *  Retorna SKU atualizado do banco ou null em caso de falha.
  */
 export async function recordMeasurementSafe(
@@ -1070,7 +1078,7 @@ export async function recordMeasurementSafe(
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      // 1) READ FRESH: pega a versão MAIS ATUALIZADA do banco NESTE EXATO MOMENTO
+      // 1) READ FRESH: pega a versÃ£o MAIS ATUALIZADA do banco NESTE EXATO MOMENTO
       const { data: fresh, error: errSel } = await supabase
         .from('sku_tp')
         .select('*')
@@ -1081,7 +1089,7 @@ export async function recordMeasurementSafe(
 
       const row: any = fresh || { sku, status: 'pendente' };
 
-      // 2) CALCULA SLOT VAZIO baseado nos valores DO BANCO (não do cache local!)
+      // 2) CALCULA SLOT VAZIO baseado nos valores DO BANCO (nÃ£o do cache local!)
       const tKeys = [keys.t1, keys.t2, keys.t3, keys.t4, keys.t5];
       let targetKey = keys.t5;
       for (let i = 0; i < tKeys.length; i++) {
@@ -1096,7 +1104,7 @@ export async function recordMeasurementSafe(
         updated[keys.qtd] = qtdUnid;
       }
 
-      // 4) Recalcula a MÉDIA (_res) baseada nas 5 tomadas DO BANCO + a nova
+      // 4) Recalcula a MÃ‰DIA (_res) baseada nas 5 tomadas DO BANCO + a nova
       const validTs = tKeys
         .map(k => updated[k])
         .filter((v: any) => typeof v === 'number' && v > 0) as number[];
@@ -1105,7 +1113,7 @@ export async function recordMeasurementSafe(
         : null;
       updated[keys.res] = avg;
 
-      // 5) Usa saveSubProcessMeasurements que já mergeia, calcula status e tempo_total com retries internos
+      // 5) Usa saveSubProcessMeasurements que jÃ¡ mergeia, calcula status e tempo_total com retries internos
       const fieldsToSave: Partial<SkuTp> = {};
       (fieldsToSave as any)[targetKey] = tVal;
       (fieldsToSave as any)[keys.res] = avg;
@@ -1125,11 +1133,11 @@ export async function recordMeasurementSafe(
     }
   }
 
-  console.error(`[recordMeasurementSafe] Falhou após ${maxRetries} tentativas (${processoId} @ ${sku}):`, lastErr);
+  console.error(`[recordMeasurementSafe] Falhou apÃ³s ${maxRetries} tentativas (${processoId} @ ${sku}):`, lastErr);
   return null;
 }
 
-/** Remove UMA tomada individual (ex: "pegar_ik_t3") e recalcula a média (_res) do processo no banco.
+/** Remove UMA tomada individual (ex: "pegar_ik_t3") e recalcula a mÃ©dia (_res) do processo no banco.
  *  Retorna SKU atualizado (com valores do banco) ou null em caso de erro.
  */
 export async function clearSingleMeasurement(
@@ -1176,7 +1184,7 @@ export async function clearSingleMeasurement(
   return await saveSubProcessMeasurements(sku, clean, operatorName);
 }
 
-/** Força um SKU a ter status 'mapeado' (conclusão manual mesmo com processos incompletos) */
+/** ForÃ§a um SKU a ter status 'mapeado' (conclusÃ£o manual mesmo com processos incompletos) */
 export async function confirmarMapeamentoForcado(
   sku: string,
   operatorName: string = 'Operador'
@@ -1190,7 +1198,7 @@ export async function confirmarMapeamentoForcado(
   const now = new Date();
   const currentTp = current || { sku, status: 'pendente' };
 
-  // Calcula tempo_total atual com base nos valores já salvos
+  // Calcula tempo_total atual com base nos valores jÃ¡ salvos
   let total = 0;
   ['abrir_res', 'form_res', 'desc_res', 'etq_res', 'pos_res', 'pegar_ik_res'].forEach(resKey => {
     const val = (currentTp as any)[resKey];
@@ -1215,7 +1223,7 @@ export async function confirmarMapeamentoForcado(
     .single();
 
   if (error) {
-    console.error('Erro ao confirmar mapeamento forçado:', error);
+    console.error('Erro ao confirmar mapeamento forÃ§ado:', error);
     return null;
   }
   invalidateCachesAfterWrite();
