@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Users, CheckCircle2, Clock, Activity, RefreshCw, Loader2,
   TrendingUp, Boxes, Play, ArrowRight, Award, Calendar,
-  Filter, X, BarChart3, ChevronDown, Search, MapPin, ChevronUp, HelpCircle
+  Filter, X, BarChart3, ChevronDown, Search, MapPin, ChevronUp, HelpCircle, Target, UserCheck
 } from 'lucide-react';
 import { getDashboardAnalytics, DashboardData, DashboardDateRange, localDateKey, TpMapBucket } from '../lib/supabase';
 
@@ -157,8 +157,67 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
     ? Number(((data.stats.concluidos / data.stats.total) * 100).toFixed(1))
     : 0;
 
-  const META_POR_ANALISTA = 30;
-  const PLANO_DIARIO = Math.max(1, data.analistas.length) * META_POR_ANALISTA;
+  // Metas e Escala do Dia por Analista
+  const todayKey = localDateKey(new Date());
+  const [showGoalsModal, setShowGoalsModal] = useState(false);
+  const [analystGoals, setAnalystGoals] = useState<Record<string, { ativo: boolean; meta: number; processo?: string }>>(() => {
+    try {
+      const saved = localStorage.getItem(`tp_daily_goals_${todayKey}`);
+      if (saved) return JSON.parse(saved);
+      const def = localStorage.getItem('tp_daily_goals_defaults');
+      if (def) return JSON.parse(def);
+    } catch { /* ignore */ }
+    return {};
+  });
+
+  const [editingGoals, setEditingGoals] = useState<Record<string, { ativo: boolean; meta: number; processo?: string }>>({});
+
+  useEffect(() => {
+    if (!data.analistas || data.analistas.length === 0) return;
+    setAnalystGoals(prev => {
+      const updated = { ...prev };
+      let changed = false;
+      data.analistas.forEach(an => {
+        if (!updated[an.nome]) {
+          updated[an.nome] = { ativo: true, meta: 30, processo: 'Padrão' };
+          changed = true;
+        }
+      });
+      return changed ? updated : prev;
+    });
+  }, [data.analistas]);
+
+  const openGoalsModal = () => {
+    const base: Record<string, { ativo: boolean; meta: number; processo?: string }> = {};
+    data.analistas.forEach(an => {
+      const cur = analystGoals[an.nome];
+      base[an.nome] = cur ? { ...cur } : { ativo: true, meta: 30, processo: 'Padrão' };
+    });
+    setEditingGoals(base);
+    setShowGoalsModal(true);
+  };
+
+  const saveDailyGoals = () => {
+    setAnalystGoals(editingGoals);
+    try {
+      localStorage.setItem(`tp_daily_goals_${todayKey}`, JSON.stringify(editingGoals));
+      localStorage.setItem('tp_daily_goals_defaults', JSON.stringify(editingGoals));
+    } catch { /* ignore */ }
+    setShowGoalsModal(false);
+  };
+
+  const analistasAtivos = data.analistas.filter(an => {
+    const cfg = analystGoals[an.nome];
+    return cfg ? cfg.ativo : true;
+  });
+
+  const PLANO_DIARIO = data.analistas.reduce((acc, an) => {
+    const cfg = analystGoals[an.nome];
+    const isAtivo = cfg ? cfg.ativo : true;
+    const meta = cfg?.meta != null ? cfg.meta : 30;
+    return acc + (isAtivo ? meta : 0);
+  }, 0) || (Math.max(1, data.analistas.length) * 30);
+
   const hojeMapeados = data.hojeMapeados ?? (data.tpMapDistribution[0]?.quantidade || 0);
   const diferencaHoje = hojeMapeados - PLANO_DIARIO;
 
@@ -430,13 +489,22 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
               <Calendar className="w-6 h-6" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2 flex-wrap">
+              <div className="flex items-center justify-between gap-1 flex-wrap">
                 <span className="text-[10px] font-black uppercase tracking-widest text-sky-600 dark:text-sky-400">Hoje</span>
-                <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 tracking-wide">
-                  ({data.analistas.length} analista{data.analistas.length === 1 ? '' : 's'} × {META_POR_ANALISTA}/dia)
-                </span>
+                <button
+                  type="button"
+                  onClick={openGoalsModal}
+                  className="text-[10px] font-black text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 px-2 py-0.5 rounded-lg border border-sky-500/20 flex items-center gap-1 transition-all active:scale-95"
+                  title="Configurar analistas ativos e metas do dia"
+                >
+                  <Target className="w-3 h-3" />
+                  <span>Ajustar Metas</span>
+                </button>
               </div>
-              <p className="text-2xl font-black text-slate-800 dark:text-[var(--color-dark-text)] font-mono leading-tight mb-2">{hojeMapeados}</p>
+              <p className="text-2xl font-black text-slate-800 dark:text-[var(--color-dark-text)] font-mono leading-tight mt-1">{hojeMapeados}</p>
+              <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 tracking-wide mt-0.5">
+                ({analistasAtivos.length} analista{analistasAtivos.length === 1 ? '' : 's'} ativo{analistasAtivos.length === 1 ? '' : 's'} hoje)
+              </p>
             </div>
           </div>
           <div className="mt-2 pt-3 border-t border-slate-100 dark:border-[var(--color-dark-border)] grid grid-cols-3 gap-2 text-center">
@@ -792,26 +860,40 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
                         </div>
                       </div>
 
-                      {/* Plano / Real / Dif do analista */}
+                      {/* Plano / Real / Dif do analista com Meta Individual do Dia */}
                       {(() => {
-                        const metaAn = META_POR_ANALISTA;
+                        const cfg = analystGoals[an.nome];
+                        const isAtivo = cfg ? cfg.ativo : true;
+                        const metaAn = isAtivo ? (cfg?.meta ?? 30) : 0;
                         const realAn = an.hoje;
                         const difAn = realAn - metaAn;
                         return (
-                          <div className="bg-slate-50/60 dark:bg-[var(--color-dark-card)] p-2.5 rounded-xl grid grid-cols-3 gap-1.5 text-center border border-slate-100 dark:border-[var(--color-dark-border)]">
-                            <div>
-                              <span className="block text-[8px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Plano</span>
-                              <span className="text-sm font-black font-mono text-slate-700 dark:text-slate-300">{metaAn}</span>
-                            </div>
-                            <div>
-                              <span className="block text-[8px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Real</span>
-                              <span className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400">{realAn}</span>
-                            </div>
-                            <div>
-                              <span className="block text-[8px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Dif</span>
-                              <span className={`text-sm font-black font-mono ${difAn >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                                {difAn >= 0 ? '+' : ''}{difAn}
+                          <div className="bg-slate-50/60 dark:bg-[var(--color-dark-card)] p-2.5 rounded-xl space-y-1.5 border border-slate-100 dark:border-[var(--color-dark-border)]">
+                            <div className="flex items-center justify-between text-[10px]">
+                              <span className="font-bold text-slate-400 dark:text-slate-500 truncate max-w-[120px]">
+                                {cfg?.processo ? `Proc: ${cfg.processo}` : 'Padrão'}
                               </span>
+                              {!isAtivo && (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-500 text-[9px] font-bold">
+                                  Inativo Hoje
+                                </span>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-3 gap-1.5 text-center">
+                              <div>
+                                <span className="block text-[8px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Plano</span>
+                                <span className="text-sm font-black font-mono text-slate-700 dark:text-slate-300">{metaAn}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[8px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Real</span>
+                                <span className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400">{realAn}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[8px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Dif</span>
+                                <span className={`text-sm font-black font-mono ${difAn >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                  {difAn >= 0 ? '+' : ''}{difAn}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         );
@@ -940,6 +1022,184 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
         )}
       </div>
 
+
+      {/* MODAL: Configurar Metas e Escala do Dia */}
+      {showGoalsModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[var(--color-dark-surface)] border border-slate-200 dark:border-[var(--color-dark-border)] rounded-3xl p-6 max-w-xl w-full space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-[var(--color-dark-border)] pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-sky-50 dark:bg-sky-400/10 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                  <Target className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-800 dark:text-[var(--color-dark-text)]">
+                    Metas e Escala do Dia ({fmtPtBr(todayKey)})
+                  </h3>
+                  <p className="text-xs text-slate-400 dark:text-[var(--color-dark-muted)]">
+                    Defina quais analistas mapeiam hoje e a meta de cada um conforme seu processo.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGoalsModal(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Ações rápidas */}
+            <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+              <span className="font-bold text-slate-500 dark:text-slate-400">Ações Rápidas:</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingGoals(prev => {
+                      const next = { ...prev };
+                      Object.keys(next).forEach(k => { next[k] = { ...next[k], ativo: true }; });
+                      return next;
+                    });
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-400/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 transition-colors"
+                >
+                  Todos Ativos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingGoals(prev => {
+                      const next = { ...prev };
+                      Object.keys(next).forEach(k => { next[k] = { ...next[k], meta: 30 }; });
+                      return next;
+                    });
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-sky-400/10 text-sky-600 dark:text-sky-400 font-bold border border-sky-200 dark:border-sky-500/20 hover:bg-sky-100 transition-colors"
+                >
+                  Meta 30 para Todos
+                </button>
+              </div>
+            </div>
+
+            {/* Lista de Analistas */}
+            <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
+              {data.analistas.map((an) => {
+                const cfg = editingGoals[an.nome] || { ativo: true, meta: 30, processo: 'Padrão' };
+                return (
+                  <div
+                    key={an.nome}
+                    className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                      cfg.ativo
+                        ? 'bg-slate-50 dark:bg-[var(--color-dark-card)] border-slate-200 dark:border-[var(--color-dark-border)]'
+                        : 'bg-slate-100/50 dark:bg-slate-900/40 border-slate-200/50 dark:border-slate-800 opacity-60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <input
+                        type="checkbox"
+                        checked={cfg.ativo}
+                        onChange={e => {
+                          const val = e.target.checked;
+                          setEditingGoals(prev => ({
+                            ...prev,
+                            [an.nome]: { ...cfg, ativo: val }
+                          }));
+                        }}
+                        className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                      />
+                      <div className="min-w-0">
+                        <p className="font-black text-xs sm:text-sm text-slate-800 dark:text-[var(--color-dark-text)] truncate">
+                          {an.nome}
+                        </p>
+                        <p className="text-[10px] text-slate-400">
+                          Hoje já realizou: <span className="font-bold text-emerald-600 dark:text-emerald-400 font-mono">{an.hoje}</span> peças
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Processo e Meta */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <input
+                        type="text"
+                        placeholder="Processo"
+                        value={cfg.processo || ''}
+                        disabled={!cfg.ativo}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setEditingGoals(prev => ({
+                            ...prev,
+                            [an.nome]: { ...cfg, processo: val }
+                          }));
+                        }}
+                        className="w-24 bg-white dark:bg-[var(--color-dark-surface)] border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-sky-500 disabled:opacity-40"
+                      />
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-bold text-slate-400">Meta:</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="200"
+                          value={cfg.meta ?? 30}
+                          disabled={!cfg.ativo}
+                          onChange={e => {
+                            const val = Math.max(0, parseInt(e.target.value) || 0);
+                            setEditingGoals(prev => ({
+                              ...prev,
+                              [an.nome]: { ...cfg, meta: val }
+                            }));
+                          }}
+                          className="w-16 bg-white dark:bg-[var(--color-dark-surface)] border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-mono font-bold text-center text-slate-800 dark:text-white outline-none focus:border-sky-500 disabled:opacity-40"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Resumo do Planejamento */}
+            {(() => {
+              const ativosCount = Object.values(editingGoals).filter(g => g.ativo).length;
+              const totalMeta = Object.values(editingGoals).reduce((acc, g) => acc + (g.ativo ? (g.meta || 0) : 0), 0);
+              return (
+                <div className="bg-sky-50 dark:bg-sky-400/10 border border-sky-100 dark:border-sky-400/20 rounded-2xl p-3 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="font-bold text-slate-500 dark:text-slate-400">Analistas Ativos:</span>
+                    <span className="ml-1.5 font-black text-sky-600 dark:text-sky-400 font-mono">{ativosCount} de {data.analistas.length}</span>
+                  </div>
+                  <div>
+                    <span className="font-bold text-slate-500 dark:text-slate-400">Meta Total do Dia:</span>
+                    <span className="ml-1.5 font-black text-sky-600 dark:text-sky-400 font-mono text-sm">{totalMeta} peças</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="flex justify-end gap-3 pt-2 border-t border-slate-100 dark:border-[var(--color-dark-border)]">
+              <button
+                type="button"
+                onClick={() => setShowGoalsModal(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold text-xs transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={saveDailyGoals}
+                className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-black text-xs flex items-center gap-1.5 shadow-lg shadow-sky-600/20 transition-all active:scale-95"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Salvar e Aplicar Metas
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
+
+

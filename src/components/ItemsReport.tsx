@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useCallback } from "react";
+﻿import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Search, Filter, X, ChevronLeft, ChevronRight,
   CheckCircle2, Clock, AlertCircle, Loader2,
   Calendar, User, Package, RefreshCw, Download,
-  ChevronDown, BarChart2, Pencil, Save, ShieldCheck
+  ChevronDown, BarChart2, Pencil, Save, ShieldCheck, RotateCcw
 } from "lucide-react";
 import { AppUser } from "../lib/auth";
 import {
-  getSkusReport, getUniqueModels, getUniqueAnalysts,
+  getSkusReport, getUniqueModels, resetItemToPendente, getUniqueAnalysts,
   SkuTp, SkusReportFilters, supabase, sanitizeSkuTpPayload,
   localDateKey, localDateTimeToUtcIso,
   fmtMappingDate, fmtMappingTime, fmtMappingDateTime
@@ -131,6 +131,28 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
     const a = document.createElement("a");
     a.href=url; a.download=`itens_tp_${localDateKey(new Date())}.csv`;
     a.click(); URL.revokeObjectURL(url);
+  };
+
+  const handleResetItemModal = async () => {
+    if (!editingItem) return;
+    if (!window.confirm(`Tem certeza que deseja zerar completamente o item ${editingItem.sku}, limpando todos os tempos, embalagens, analista e data de mapeamento para voltar a PENDENTE do zero?`)) {
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      const reset = await resetItemToPendente(editingItem.sku);
+      if (reset) {
+        setItems(prev => prev.map(item => item.sku === reset.sku ? reset : item));
+        setEditingItem(null);
+        alert(`Item ${reset.sku} foi zerado e retornado para Pendente com sucesso!`);
+      } else {
+        alert('Erro ao resetar item.');
+      }
+    } catch (err: any) {
+      alert('Erro: ' + (err.message || err));
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
@@ -510,12 +532,23 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
                     <div><label className="text-[10px] text-slate-400 font-bold block mb-1">Carro</label><input type="text" value={editingItem.carro||""} onChange={e => setEditingItem({...editingItem,carro:e.target.value})} className="w-full bg-[#1e222d] border border-slate-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-orange-500" /></div>
                   </div>
                 </div>
-                <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
-                  <button type="button" onClick={() => setEditingItem(null)} disabled={savingEdit} className="px-5 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-sm hover:bg-slate-700 transition-colors">Cancelar</button>
-                  <button type="submit" disabled={savingEdit} className="px-6 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-black text-sm flex items-center gap-2 shadow-lg shadow-orange-500/20 transition-colors">
-                    {savingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    {savingEdit ? "Salvando..." : "Salvar Alteracoes"}
+                <div className="flex items-center justify-between gap-3 pt-4 border-t border-slate-800 flex-wrap">
+                  <button 
+                    type="button" 
+                    onClick={handleResetItemModal} 
+                    disabled={savingEdit} 
+                    className="px-4 py-2.5 rounded-xl border border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 font-bold text-xs flex items-center gap-1.5 transition-colors"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Zerar Item (Voltar a Pendente)
                   </button>
+                  <div className="flex gap-3">
+                    <button type="button" onClick={() => setEditingItem(null)} disabled={savingEdit} className="px-5 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-sm hover:bg-slate-700 transition-colors">Cancelar</button>
+                    <button type="submit" disabled={savingEdit} className="px-6 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-black text-sm flex items-center gap-2 shadow-lg shadow-orange-500/20 transition-colors">
+                      {savingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      {savingEdit ? "Salvando..." : "Salvar Alteracoes"}
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
@@ -544,3 +577,5 @@ function InfoChip({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
+

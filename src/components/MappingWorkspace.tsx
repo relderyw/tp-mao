@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Search, ChevronLeft, ChevronRight, Play, Pause, Save, RotateCcw,
+  Search, ChevronLeft, ChevronRight, Play, Pause, Save, RotateCcw, Plus, Plus,
   CheckCircle2, Clock, AlertCircle, Loader2, Sparkles, User, RefreshCw,
   Zap, FastForward, ArrowDownRight, Layers, X
 } from 'lucide-react';
 import {
-  getSkusList, getStatsTp, saveSubProcessMeasurements, SkuTp, StatsTp, confirmarMapeamentoForcado, clearSingleMeasurement, recordMeasurementSafe
+  getSkusList, getStatsTp, saveSubProcessMeasurements, SkuTp, StatsTp, confirmarMapeamentoForcado, clearSingleMeasurement, recordMeasurementSafe, resetItemToPendente, cadastrarItemNovo
 } from '../lib/supabase';
 import { getSession } from '../lib/auth';
 
@@ -147,7 +147,83 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
 
   const [savingInfo, setSavingInfo] = useState(false);
   const [infoSaved, setInfoSaved] = useState(false);
-  const [confirmingMap, setConfirmingMap] = useState(false);
+    const [confirmingMap, setConfirmingMap] = useState(false);
+
+  // Estados para Resetar Item para Pendente e Cadastrar Novo SKU
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [showNewSkuModal, setShowNewSkuModal] = useState(false);
+  const [newSkuInput, setNewSkuInput] = useState('');
+  const [newSkuDesc, setNewSkuDesc] = useState('');
+  const [newSkuModelo, setNewSkuModelo] = useState('NOVO');
+  const [savingNewSku, setSavingNewSku] = useState(false);
+
+  const handleResetItem = async () => {
+    if (!selectedSku) return;
+    setResetting(true);
+    try {
+      const updated = await resetItemToPendente(selectedSku.sku);
+      if (updated) {
+        setSkus(prev => prev.map((s, idx) => idx === selectedSkuIndex ? updated : s));
+        resetTimer();
+        setItemInfo({
+          pecas_kd: '',
+          tp_emb_forn: '',
+          pd_emb_forn: '',
+          tp_emb_dcc: '',
+          pd_emb_dcc: '',
+          carro: '',
+          form_unid: '',
+          form_qtd: '',
+        });
+        itemInfoSavedRef.current = {
+          pecas_kd: '', tp_emb_forn: '', pd_emb_forn: '', tp_emb_dcc: '', pd_emb_dcc: '', carro: '', form_unid: '', form_qtd: ''
+        };
+        clearDirtyFlags();
+        setShowResetModal(false);
+        showFeedback('success', `Item ${selectedSku.sku} foi zerado e retornado para Pendente!`);
+        loadData(true);
+      } else {
+        showFeedback('error', 'Falha ao resetar o item.');
+      }
+    } catch (err: any) {
+      showFeedback('error', 'Erro ao resetar: ' + (err.message || err));
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const handleCreateNewSku = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const skuCode = newSkuInput.trim().toUpperCase();
+    if (!skuCode) {
+      showFeedback('error', 'Informe o código do SKU!');
+      return;
+    }
+    setSavingNewSku(true);
+    try {
+      const created = await cadastrarItemNovo(skuCode, newSkuDesc || 'NOVO ITEM', newSkuModelo || 'NOVO');
+      if (created) {
+        setSkus(prev => [created, ...prev.filter(s => s.sku !== created.sku)]);
+        setSelectedSkuIndex(0);
+        resetTimer();
+        clearDirtyFlags();
+        setShowNewSkuModal(false);
+        setNewSkuInput('');
+        setNewSkuDesc('');
+        setNewSkuModelo('NOVO');
+        showFeedback('success', `Item ${created.sku} cadastrado com sucesso! Pronto para mapear.`);
+        scrollToPanel();
+        loadData(true);
+      } else {
+        showFeedback('error', 'Erro ao cadastrar novo item.');
+      }
+    } catch (err: any) {
+      showFeedback('error', 'Erro: ' + (err.message || err));
+    } finally {
+      setSavingNewSku(false);
+    }
+  };
 
   // ↓ Sincroniza refs com estados para evitar closures velhos no polling
   useEffect(() => { searchTermRef.current = searchTerm; }, [searchTerm]);
@@ -807,16 +883,32 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
             </div>
           </div>
 
-          {/* Campo de Busca */}
-          <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              placeholder="Buscar código ou descrição"
-              className="w-full bg-[#1e222d] border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-orange-500 transition-colors font-medium"
-            />
+                    {/* Campo de Busca e Botão Novo SKU */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                placeholder="Buscar código ou descrição"
+                className="w-full bg-[#1e222d] border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-orange-500 transition-colors font-medium"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setNewSkuInput(searchTerm.trim().toUpperCase());
+                setNewSkuDesc('');
+                setNewSkuModelo('NOVO');
+                setShowNewSkuModal(true);
+              }}
+              className="px-3.5 py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-black text-xs flex items-center gap-1.5 shrink-0 transition-all shadow-lg shadow-orange-500/10 active:scale-95"
+              title="Cadastrar item que não está na base"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">Novo SKU</span>
+            </button>
           </div>
 
           {/* Lista de SKUs na Lateral */}
@@ -827,10 +919,33 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                 <span>Carregando SKUs...</span>
               </div>
             ) : skusVisiveis.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 text-xs font-semibold space-y-2">
-                <p className="text-sm font-black text-emerald-400">🎉 TODOS os itens desta busca foram MAREADOS!</p>
-                <p>Exibindo apenas Pendentes / Em Andamento.</p>
-                <p className="text-[10px] text-slate-600">Mude a busca no campo acima ou aguarde novas importações de saldo.</p>
+              <div className="text-center py-8 text-slate-500 text-xs font-semibold space-y-3 bg-[#1e222d]/40 rounded-2xl p-4 border border-slate-800/60">
+                {searchTerm.trim() ? (
+                  <>
+                    <p className="text-sm font-black text-white">Item não encontrado na base:</p>
+                    <p className="text-base font-mono font-black text-orange-400">"{searchTerm.trim().toUpperCase()}"</p>
+                    <p className="text-[11px] text-slate-400">Este item ainda não consta na estrutura. Deseja cadastrá-lo como NOVO e iniciar a medição agora?</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewSkuInput(searchTerm.trim().toUpperCase());
+                        setNewSkuDesc('');
+                        setNewSkuModelo('NOVO');
+                        setShowNewSkuModal(true);
+                      }}
+                      className="w-full py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-black text-xs flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Cadastrar e Mapear Item
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-black text-emerald-400">🎉 TODOS os itens desta busca foram MAPEADOS!</p>
+                    <p>Exibindo apenas Pendentes / Em Andamento.</p>
+                    <p className="text-[10px] text-slate-600">Mude a busca no campo acima ou cadastre um novo item no botão "Novo SKU".</p>
+                  </>
+                )}
               </div>
             ) : (
               skusVisiveis.map((skuItem) => {
@@ -869,32 +984,56 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
         {/* ── PAINEL DIREITO: CRONÔMETRO E SUB-PROCESSOS ── */}
         <div ref={rightPanelRef} className="lg:col-span-7 space-y-4 scroll-mt-4">
 
-          {/* Header do SKU Ativo com Navegação das Setas ← → */}
-          <div className="bg-[#181b22] border border-slate-800/80 rounded-3xl p-4 flex items-center justify-between">
+          {/* Header do SKU Ativo com Navegação das Setas ← → e Botão Zerar */}
+          <div className="bg-[#181b22] border border-slate-800/80 rounded-3xl p-4 flex items-center justify-between gap-2">
             <button
               onClick={handlePrevSku}
               disabled={selectedSkuIndex === 0}
-              className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0"
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
 
-            <div className="text-center min-w-0 px-4">
-              <h1 className="text-lg md:text-xl font-black text-white font-mono tracking-tight truncate">
-                {selectedSku ? selectedSku.sku : 'SELECIONE UM SKU'}
-              </h1>
+            <div className="text-center min-w-0 px-2 flex-1">
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                <h1 className="text-lg md:text-xl font-black text-white font-mono tracking-tight truncate">
+                  {selectedSku ? selectedSku.sku : 'SELECIONE UM SKU'}
+                </h1>
+                {selectedSku && (
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                    selectedSku.status === 'mapeado' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                    selectedSku.status === 'andamento' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                    'bg-slate-800 text-slate-400 border border-slate-700'
+                  }`}>
+                    {selectedSku.status}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-400 truncate font-medium mt-0.5">
-                {selectedSku ? selectedSku.descricao : 'Carregando...'}
+                {selectedSku ? (selectedSku.descricao || 'Sem descrição') : 'Carregando...'}
               </p>
             </div>
 
-            <button
-              onClick={handleNextSku}
-              disabled={selectedSkuIndex >= skus.length - 1}
-              className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {selectedSku && (
+                <button
+                  type="button"
+                  onClick={() => setShowResetModal(true)}
+                  title="Zerar medição e voltar item para pendente"
+                  className="p-2.5 rounded-xl border border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition-all flex items-center gap-1.5 text-xs font-bold active:scale-95"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span className="hidden sm:inline">Zerar</span>
+                </button>
+              )}
+              <button
+                onClick={handleNextSku}
+                disabled={selectedSkuIndex >= skus.length - 1}
+                className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* ── CARD: Informações do Item ── */}
@@ -1233,11 +1372,147 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
                   Confirmar Mapeamento
                 </button>
               )}
+
+              {selectedSku.status === 'mapeado' && (
+                <button
+                  type="button"
+                  onClick={() => setShowResetModal(true)}
+                  className="w-full py-3 rounded-2xl font-black text-xs md:text-sm flex items-center justify-center gap-2 transition-all border border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 active:scale-[0.98]"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Zerar Todas as Medições (Voltar para Pendente do Zero)
+                </button>
+              )}
             </div>
           )}
         </div>
 
       </div>
+
+      {/* MODAL: Zerar Item para Pendente */}
+      {showResetModal && selectedSku && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#181b22] border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+              <RotateCcw className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-lg font-black text-white">Zerar Item para Pendente?</h3>
+              <p className="text-sm font-mono text-orange-400 font-bold">{selectedSku.sku}</p>
+              <p className="text-xs text-slate-400 pt-2 leading-relaxed">
+                Esta ação irá limpar <strong>todos os tempos cronometrados</strong>, médias, embalagens, analista responsável e data de mapeamento deste item, retornando-o ao status <strong>PENDENTE</strong> do zero.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                disabled={resetting}
+                className="py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleResetItem}
+                disabled={resetting}
+                className="py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-rose-600/20"
+              >
+                {resetting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                Sim, Zerar Item
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Cadastrar Novo SKU */}
+      {showNewSkuModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <form onSubmit={handleCreateNewSku} className="bg-[#181b22] border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <h3 className="text-base font-black text-white flex items-center gap-2">
+                <Plus className="w-5 h-5 text-orange-500" />
+                Cadastrar Novo Item para Mapear
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowNewSkuModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                  Código SKU *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newSkuInput}
+                  onChange={e => setNewSkuInput(e.target.value.toUpperCase())}
+                  placeholder="Ex: 11100K0A DB02"
+                  className="w-full bg-[#1e222d] border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white placeholder-slate-500 outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                  Descrição do Item
+                </label>
+                <input
+                  type="text"
+                  value={newSkuDesc}
+                  onChange={e => setNewSkuDesc(e.target.value)}
+                  placeholder="Ex: CARCAÇA DIR.MOTOR (Opcional)"
+                  className="w-full bg-[#1e222d] border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                  Modelo
+                </label>
+                <input
+                  type="text"
+                  value={newSkuModelo}
+                  onChange={e => setNewSkuModelo(e.target.value.toUpperCase())}
+                  placeholder="NOVO"
+                  className="w-full bg-[#1e222d] border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white placeholder-slate-500 outline-none focus:border-orange-500"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">Salvo como "NOVO" por padrão.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowNewSkuModal(false)}
+                className="py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={savingNewSku || !newSkuInput.trim()}
+                className="py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-black text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-orange-500/20 disabled:opacity-50"
+              >
+                {savingNewSku ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                Criar e Mapear
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
     </div>
   );
 }
+
+
+
+
+

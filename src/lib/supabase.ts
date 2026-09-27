@@ -1229,3 +1229,115 @@ export async function confirmarMapeamentoForcado(
   invalidateCachesAfterWrite();
   return updated;
 }
+
+
+/**
+ * Reseta completamente um SKU para o estado PENDENTE:
+ * - Limpa todos os tempos individuais de tomada (t1..t5, qtd, res) dos 6 subprocessos
+ * - Limpa dados de embalagem (forn, dcc, pecas_kd, carro)
+ * - Remove responsavel, data_map, tempo_total e tp_map
+ * - Seta status = 'pendente'
+ * Preserva: id, sku, descricao, modelo e created_at.
+ */
+export async function resetItemToPendente(sku: string): Promise<SkuTp | null> {
+  const cleanSku = sku.trim();
+  const idNorm = cleanSku.replace(/\//g, '_');
+
+  const { data: current, error: errSel } = await supabase
+    .from('sku_tp')
+    .select('*')
+    .eq('sku', cleanSku)
+    .single();
+
+  if (errSel && !current) {
+    console.error('Erro ao buscar SKU para resetar:', errSel);
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const resetPayload: any = {
+    id: current?.id || idNorm,
+    sku: cleanSku,
+    descricao: current?.descricao || '',
+    modelo: current?.modelo || '',
+    status: 'pendente',
+    responsavel: null,
+    data_map: null,
+    tempo_total: 0,
+    tp_map: 0,
+    pecas_kd: null,
+    tp_emb_forn: null,
+    pd_emb_forn: null,
+    tp_emb_dcc: null,
+    pd_emb_dcc: null,
+    carro: null,
+    pegar_ik_t1: null, pegar_ik_t2: null, pegar_ik_t3: null, pegar_ik_t4: null, pegar_ik_t5: null, pegar_ik_qtd: null, pegar_ik_res: null,
+    abrir_t1: null, abrir_t2: null, abrir_t3: null, abrir_t4: null, abrir_t5: null, abrir_qtd: null, abrir_res: null,
+    form_t1: null, form_t2: null, form_t3: null, form_t4: null, form_t5: null, form_unid: null, form_qtd: null, form_res: null,
+    desc_t1: null, desc_t2: null, desc_t3: null, desc_t4: null, desc_t5: null, desc_qtd: null, desc_res: null,
+    etq_t1: null, etq_t2: null, etq_t3: null, etq_t4: null, etq_t5: null, etq_qtd: null, etq_res: null,
+    pos_t1: null, pos_t2: null, pos_t3: null, pos_t4: null, pos_t5: null, pos_qtd: null, pos_res: null,
+    updated_at: now
+  };
+
+  const cleanPayload = sanitizeSkuTpPayload(resetPayload, false);
+
+  const { data: updated, error } = await supabase
+    .from('sku_tp')
+    .upsert(cleanPayload, { onConflict: 'sku' })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Erro ao resetar SKU para pendente:', error);
+    return null;
+  }
+
+  invalidateCachesAfterWrite();
+  return updated as SkuTp;
+}
+
+/**
+ * Cadastra um novo item que não está na base e o coloca imediatamente como pendente,
+ * com modelo padrão "NOVO" ou especificado pelo usuário.
+ */
+export async function cadastrarItemNovo(
+  sku: string,
+  descricao: string = 'NOVO ITEM',
+  modelo: string = 'NOVO'
+): Promise<SkuTp | null> {
+  const cleanSku = sku.trim().toUpperCase();
+  if (!cleanSku) return null;
+  const idNorm = cleanSku.replace(/\//g, '_');
+  const now = new Date().toISOString();
+
+  const payload: any = {
+    id: idNorm,
+    sku: cleanSku,
+    descricao: (descricao || 'NOVO ITEM').trim(),
+    modelo: (modelo || 'NOVO').trim().toUpperCase(),
+    status: 'pendente',
+    responsavel: null,
+    data_map: null,
+    tempo_total: 0,
+    tp_map: 0,
+    created_at: now,
+    updated_at: now
+  };
+
+  const cleanPayload = sanitizeSkuTpPayload(payload, false);
+
+  const { data, error } = await supabase
+    .from('sku_tp')
+    .upsert(cleanPayload, { onConflict: 'sku' })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Erro ao cadastrar novo item:', error);
+    return null;
+  }
+
+  invalidateCachesAfterWrite();
+  return data as SkuTp;
+}

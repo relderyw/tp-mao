@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query, where, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Download, Loader2, Table, Zap, ChevronRight, FileSpreadsheet, Save, CheckCircle2 } from 'lucide-react';
@@ -25,7 +25,7 @@ export default function SpreadsheetView() {
       const snap = await getDocs(q);
       const items = snap.docs
         .map(d => ({ ...d.data(), id: d.id }))
-        .sort((a, b) => a.order - b.order);
+        .sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
 
       const processed = processDataWithSums(items);
       setData(processed);
@@ -304,3 +304,4 @@ export default function SpreadsheetView() {
     </div>
   );
 }
+
