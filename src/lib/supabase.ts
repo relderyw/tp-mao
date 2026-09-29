@@ -1241,7 +1241,6 @@ export async function confirmarMapeamentoForcado(
  */
 export async function resetItemToPendente(sku: string): Promise<SkuTp | null> {
   const cleanSku = sku.trim();
-  const idNorm = cleanSku.replace(/\//g, '_');
 
   const { data: current, error: errSel } = await supabase
     .from('sku_tp')
@@ -1256,7 +1255,6 @@ export async function resetItemToPendente(sku: string): Promise<SkuTp | null> {
 
   const now = new Date().toISOString();
   const resetPayload: any = {
-    id: current?.id || idNorm,
     sku: cleanSku,
     descricao: current?.descricao || '',
     modelo: current?.modelo || '',
@@ -1280,11 +1278,12 @@ export async function resetItemToPendente(sku: string): Promise<SkuTp | null> {
     updated_at: now
   };
 
-  const cleanPayload = sanitizeSkuTpPayload(resetPayload, false);
+  const cleanPayload = sanitizeSkuTpPayload(resetPayload);
 
   const { data: updated, error } = await supabase
     .from('sku_tp')
-    .upsert(cleanPayload, { onConflict: 'sku' })
+    .update(cleanPayload)
+    .eq('sku', cleanSku)
     .select('*')
     .single();
 
@@ -1308,11 +1307,9 @@ export async function cadastrarItemNovo(
 ): Promise<SkuTp | null> {
   const cleanSku = sku.trim().toUpperCase();
   if (!cleanSku) return null;
-  const idNorm = cleanSku.replace(/\//g, '_');
   const now = new Date().toISOString();
 
   const payload: any = {
-    id: idNorm,
     sku: cleanSku,
     descricao: (descricao || 'NOVO ITEM').trim(),
     modelo: (modelo || 'NOVO').trim().toUpperCase(),
@@ -1321,11 +1318,10 @@ export async function cadastrarItemNovo(
     data_map: null,
     tempo_total: 0,
     tp_map: 0,
-    created_at: now,
     updated_at: now
   };
 
-  const cleanPayload = sanitizeSkuTpPayload(payload, false);
+  const cleanPayload = sanitizeSkuTpPayload(payload);
 
   const { data, error } = await supabase
     .from('sku_tp')
