@@ -58,6 +58,7 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
   const canEdit = isAdmin || currentUser?.permissions?.canEdit === true;
 
   const [validatingSkus, setValidatingSkus] = useState<Set<string>>(new Set());
+  const [resettingSkus, setResettingSkus] = useState<Set<string>>(new Set());
 
   const [search, setSearch] = useState("");
   const [filterModelo, setFilterModelo] = useState("");
@@ -152,6 +153,28 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
       alert('Erro: ' + (err.message || err));
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  const handleResetSku = async (item: SkuTp) => {
+    if (!window.confirm(`Tem certeza que deseja zerar completamente o item ${item.sku} e retorná-lo para PENDENTE?`)) return;
+    setResettingSkus(prev => new Set(prev).add(item.sku));
+    try {
+      const reset = await resetItemToPendente(item.sku);
+      if (reset) {
+        setItems(prev => prev.map(current => current.sku === reset.sku ? reset : current));
+        alert(`Item ${reset.sku} foi zerado e retornado para Pendente com sucesso!`);
+      } else {
+        alert('Erro ao resetar item.');
+      }
+    } catch (err: any) {
+      alert('Erro: ' + (err.message || err));
+    } finally {
+      setResettingSkus(prev => {
+        const next = new Set(prev);
+        next.delete(item.sku);
+        return next;
+      });
     }
   };
 
@@ -404,6 +427,14 @@ export default function ItemsReport({ currentUser }: ItemsReportProps) {
                                 </div>
                                 {(canEdit || isAdmin) && (
                                   <div className="flex flex-wrap justify-end gap-2 mt-3 pt-3 border-t border-slate-700/50">
+                                    <button
+                                      onClick={e => { e.stopPropagation(); void handleResetSku(item); }}
+                                      disabled={resettingSkus.has(item.sku)}
+                                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-black hover:bg-rose-500/20 transition-all disabled:opacity-50"
+                                    >
+                                      {resettingSkus.has(item.sku) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                                      Zerar Item
+                                    </button>
                                     {/* Validar / Reverter Status */}
                                     {(() => {
                                       const allMapped = isAllTimesMapped(item);

@@ -81,7 +81,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (tab: any) => vo
   const [endDate,   setEndDate]   = useState<string>('');
   const [activePreset, setActivePreset] = useState<PresetKey>('all');
   // ⬇️ NOVO: Data exata de mapeamento selecionada (YYYY-MM-DD | '')
-  // Usado para filtrar por UM dia específico em que itens foram MAREADOS.
+  // Usado para filtrar por UM dia específico em que itens foram MAPEADOS.
   const [exactMappingDate, setExactMappingDate] = useState<string>('');
   const [dateDropdownOpen, setDateDropdownOpen] = useState<boolean>(false);
   const [dateFilterQuery, setDateFilterQuery] = useState<string>('');

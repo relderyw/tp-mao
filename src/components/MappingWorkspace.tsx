@@ -556,6 +556,19 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
     setIsRunning(false);
   };
 
+  const startTimer = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    startTimeRef.current = Date.now();
+    timeRef.current = 0;
+    setTime(0);
+    setIsRunning(true);
+    timerRef.current = window.setInterval(() => {
+      const elapsed = (Date.now() - startTimeRef.current) / 1000;
+      setTime(elapsed);
+      timeRef.current = elapsed;
+    }, 30);
+  };
+
   // Rola suavemente o painel de mapeamento para a visão (comportamento mobile)
   const scrollToPanel = () => {
     setTimeout(() => {
@@ -589,7 +602,8 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
   const recordTimeToProcess = async (
     procConfig: typeof PROCESS_CONFIGS[number],
     customTimeSec?: number,
-    keepRunningAfter: boolean = false
+    keepRunningAfter: boolean = false,
+    preserveTimer: boolean = false
   ) => {
     if (!selectedSku) return null;
 
@@ -648,19 +662,9 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
     }
     setSavingSlot(false);
 
-    if (keepRunningAfter) {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-      startTimeRef.current = Date.now();
-      timeRef.current = 0;
-      setTime(0);
-      setIsRunning(true);
-      timerRef.current = window.setInterval(() => {
-        const elapsed = (Date.now() - startTimeRef.current) / 1000;
-        setTime(elapsed);
-        timeRef.current = elapsed;
-      }, 30);
-    } else {
-      resetTimer();
+    if (!preserveTimer) {
+      if (keepRunningAfter) startTimer();
+      else resetTimer();
     }
 
     return updated;
@@ -709,53 +713,34 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
   const handleSelectProcess = async (targetProcId: string) => {
     if (targetProcId === activeProcessId) return;
 
-    // Primeiro: flush de informações do item que podem estar pendentes
-    await flushPendingItemInfo();
-
     // ── Lógica da cronometragem ao pular processos ──────────────────────────
     // Se o cronômetro estava RODANDO (isRunning) ou TEM TEMPO ACUMULADO (timeRef > 0.1s):
     //   → salva o tempo no processo anterior
     //   → inicia automaticamente o cronômetro no novo processo
     // Caso contrário (nenhum tempo tomado):
     //   → só troca, NÃO inicia automaticamente
-    const estavaContandoTempo = isRunning || timeRef.current > 0.1;
+    const capturedTime = timeRef.current;
+    const estavaContandoTempo = isRunning || capturedTime > 0.1;
+    const currentProc = PROCESS_CONFIGS.find(p => p.id === activeProcessId);
 
-    if (timeRef.current > 0.1) {
-      const currentProc = PROCESS_CONFIGS.find(p => p.id === activeProcessId);
-      if (currentProc) {
-        // Salva o tempo decorrido no processo atual, sem reiniciar (a gente controla manualmente abaixo)
-        await recordTimeToProcess(currentProc, timeRef.current, false);
-      }
-    } else {
-      // Zera completamente caso não houvesse tempo a salvar
-      resetTimer();
-    }
-
-    setActiveProcessId(targetProcId);
-
-    // Garante reset básico do cronômetro para a nova contagem começar do zero
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    setActiveProcessId(targetProcId);
     timeRef.current = 0;
     setTime(0);
+    if (estavaContandoTempo) startTimer();
+    else setIsRunning(false);
 
-    // ↓ Regra principal: SÓ inicia automaticamente SE estava contando algo antes
-    if (estavaContandoTempo) {
-      startTimeRef.current = Date.now();
-      setIsRunning(true);
-      timerRef.current = window.setInterval(() => {
-        const elapsed = (Date.now() - startTimeRef.current) / 1000;
-        setTime(elapsed);
-        timeRef.current = elapsed;
-      }, 30);
+    if (capturedTime > 0.1 && currentProc) {
+      await recordTimeToProcess(currentProc, capturedTime, false, true);
     } else {
-      setIsRunning(false);
+      void flushPendingItemInfo();
     }
   };
 
   // ── Confirmar Mapeamento (Marca item como mapeado mesmo incompleto) ──
   const handleConfirmarMapeamento = async () => {
     if (!selectedSku) return;
-    if (!confirm(`Deseja realmente confirmar o SKU ${selectedSku.sku} como MAREADO?\nMesmo que nem todos os processos tenham sido concluídos, o status passará a "Concluído".`)) return;
+    if (!confirm(`Deseja realmente confirmar o SKU ${selectedSku.sku} como MAPEADO?\nMesmo que nem todos os processos tenham sido concluídos, o status passará a "Concluído".`)) return;
 
     await flushPendingItemInfo();
 
@@ -767,7 +752,7 @@ export default function MappingWorkspace({ initialSku, onMappingSaved }: Mapping
       setSkus(newSkus);
       setStats(await getStatsTp());
       onMappingSaved?.();
-      showFeedback('success', `✓ SKU ${selectedSku.sku} confirmado como MAREADO!`);
+      showFeedback('success', `✓ SKU ${selectedSku.sku} confirmado como MAPEADO!`);
       // Item concluído: zera dirty flags de todos os campos
       clearDirtyFlags();
     } else {
